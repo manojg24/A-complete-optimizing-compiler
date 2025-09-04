@@ -81,7 +81,7 @@ public class Scanner implements Iterator<Token>
     @Override
     public boolean hasNext () 
     {
-        return nextToken != null && nextToken.kind != Token.Kind.EOF;
+        return nextToken != null;
     }
 
     /*
@@ -95,54 +95,101 @@ public class Scanner implements Iterator<Token>
     @Override
     public Token next () 
     {
-        if (!hasNext()) 
-        {
+    	if (nextToken == null) {
             throw new NoSuchElementException();
         }
+
         Token current = nextToken;
-        advance();
+
+        if (current.kind == Token.Kind.EOF) {
+            // after returning EOF, stop further iteration
+            nextToken = null;
+        } else {
+            advance();  // load the next token
+        }
+
         return current;
     }
 
-    private void advance() 
-    {
-        skipWhitespaceAndComments();
+    private void advance() {
+        if(skipWhitespaceAndComments())
+        {
+        	return;
+        }
         if (nextChar == -1) 
         {
-        	nextToken = new Token(Token.Kind.EOF, "", lineNum, charPos);
+            nextToken = new Token(Token.Kind.EOF, "", lineNum, charPos);
             return;
         }
         char c = (char) nextChar;
         scan = "";
 
-        // Negative numbers (no space between '-' and digit)
-        if (c == '-') 
-        {
-            readChar();
-            if (Character.isDigit((char) nextChar)) 
-            {
+        // --- Operators and punctuation (maximal munch) ---
+        if (isOperator(c)) {
+            // check if it's a negative number: '-' followed by a digit
+            if (c == '-' && Character.isDigit((char) peekNextChar())) {
+                readChar(); // consume '-'
                 scan = "-" + consumeDigits();
                 nextToken = new Token(Token.Kind.INT_VAL, scan, lineNum, charPos);
                 return;
-            } 
-            else 
-            {
-            	nextToken = new Token(Token.Kind.SUB, "-", lineNum, charPos);
-                return;
             }
-        }
 
-        // Numbers
-        if (Character.isDigit(c)) 
-        {
-            scan = consumeDigits();
-            nextToken = new Token(Token.Kind.INT_VAL, scan, lineNum, charPos);
+            // consume operators (single or multi-character)
+            String op = consumeOperator();
+            Token.Kind kind = Token.lookupKind(op);
+            if (kind == Token.Kind.ERROR) {
+                Error("Unknown operator: " + op, null);
+                nextToken = new Token(Token.Kind.ERROR, op, lineNum, charPos);
+            } else {
+                nextToken = new Token(kind, op, lineNum, charPos);
+            }
             return;
         }
 
-        // Identifiers/Keywords
-        if (Character.isLetter(c) || c == '_') 
-        {
+        // --- Numbers (integer or float) ---
+        if (Character.isDigit(c) || (c == '-' && Character.isDigit(peekNextChar()))) {
+            StringBuilder sb = new StringBuilder();
+            boolean isFloat = false;
+
+            // Handle negative
+            if (c == '-') {
+                sb.append('-');
+                readChar();
+            }
+
+            // Integer part
+            while (nextChar != -1 && Character.isDigit((char) nextChar)) {
+                sb.append((char) nextChar);
+                readChar();
+            }
+
+            // Fractional part
+            if (nextChar == '.') {
+                sb.append('.');
+                readChar();
+                boolean hasFraction = false;
+                while (nextChar != -1 && Character.isDigit((char) nextChar)) {
+                    sb.append((char) nextChar);
+                    readChar();
+                    hasFraction = true;
+                }
+                if (!hasFraction) {
+                    // malformed float like -17.
+                    nextToken = new Token(Token.Kind.ERROR, "ERROR", lineNum, charPos);
+                    return;
+                }
+                isFloat = true;
+            }
+
+            // produce token
+            nextToken = isFloat
+                ? new Token(Token.Kind.FLOAT_VAL, sb.toString(), lineNum, charPos)
+                : new Token(Token.Kind.INT_VAL, sb.toString(), lineNum, charPos);
+            return;
+        }
+        
+        // --- Identifiers / Keywords ---
+        if (Character.isLetter(c) || c == '_') {
             scan = consumeIdentifier();
             Token.Kind kind = Token.lookupKind(scan);
             if (kind == null) kind = Token.Kind.IDENT;
@@ -150,62 +197,100 @@ public class Scanner implements Iterator<Token>
             return;
         }
 
-        // Operators and punctuation (maximal munch)
-        String op = consumeOperator();
-        if (op != null) 
-        {
-            Token.Kind kind = Token.lookupKind(op);
-            if (kind == null) 
-            {
-                Error("Unknown operator: " + op, null);
-                nextToken = new Token(Token.Kind.IDENT, op, lineNum, charPos);
-            } 
-            else 
-            {
-            	nextToken = new Token(kind, op, lineNum, charPos);
-            }
-            return;
-        }
-
-        // Unknown character
+        // --- Unknown single character ---
         scan = Character.toString(c);
         readChar();
-        nextToken = new Token(Token.Kind.IDENT, scan, lineNum, charPos);
+        nextToken = new Token(Token.Kind.ERROR, scan, lineNum, charPos);
+        
+        // EOF
+        if (nextChar == -1) {
+            nextToken = new Token(Token.Kind.EOF, "", lineNum, charPos);
+            return;
+        }
     }
 
     // Helpers
-    private void skipWhitespaceAndComments() 
-    {
-        while (nextChar != -1) 
-        {
-            char c = (char) nextChar;
-            if (Character.isWhitespace(c)) 
-            {
-                readChar();
-                continue;
-            }
-            // line comment
-            if (c == '/') 
-            {
-                try { input.mark(2); } 
-                catch (IOException e) {}
-                readChar();
-                if (nextChar == '/') 
-                {
-                    // skip until end of line
-                    while (nextChar != -1 && nextChar != '\n') readChar();
-                    continue;
-                } 
-                else 
-                {
-                    try { input.reset(); } 
-                    catch (IOException e) {}
-                }
-            }
-            break;
+    private boolean isOperator(char c) {
+        switch (c) {
+            case '+':
+            case '-':
+            case '*':
+            case '/':
+            case '%':
+            case '^':
+            case '=':
+            case '!':
+            case '<':
+            case '>':
+            case ';':
+            case ',':
+            case ':':
+            case '.':
+            case '{':
+            case '}':
+            case '[':
+            case ']':
+            case '(':
+            case ')':
+                return true;
+            default:
+                return false;
         }
     }
+    
+    private int peekNextChar() 
+    {
+    	try 
+    	{
+    		input.mark(1);
+    		int ch = input.read();
+    		input.reset();
+    		return ch;
+    	} 
+    	catch (IOException e) 
+    	{
+           return -1;
+    	}
+    }
+    
+    private boolean skipWhitespaceAndComments() {
+        while (true) {
+            // Skip whitespace
+            while (nextChar != -1 && Character.isWhitespace((char) nextChar)) {
+                readChar();
+            }
 
+            // Skip line comments //
+            if (nextChar == '/' && peekNextChar() == '/') {
+                while (nextChar != -1 && nextChar != '\n') readChar();
+                continue;
+            }
+
+            // Skip block comments /* ... */
+            if (nextChar == '/' && peekNextChar() == '*') {
+                readChar(); // consume '/'
+                readChar(); // consume '*'
+                while (true) {
+                    if (nextChar == -1) {
+                        // EOF inside block comment → produce ERROR
+                        nextToken = new Token(Token.Kind.ERROR, "ERROR", lineNum, charPos);
+                        return true; // signal error
+                    }
+                    if (nextChar == '*' && peekNextChar() == '/') {
+                        readChar(); // consume '*'
+                        readChar(); // consume '/'
+                        break;
+                    }
+                    readChar();
+                }
+                continue;
+            }
+
+            break; // no more whitespace/comments
+        }
+        return false; // no error found
+    }
+    
     private String consumeDigits() 
     {
         StringBuilder sb = new StringBuilder();
@@ -234,19 +319,21 @@ public class Scanner implements Iterator<Token>
 
     private String consumeOperator() 
     {
-        StringBuilder sb = new StringBuilder();
-        sb.append((char) nextChar);
-        readChar();
+        char first = (char) nextChar;
+        readChar(); // move to next character
+
         if (nextChar != -1) 
         {
-            String two = sb.toString() + (char) nextChar;
-            if (Token.lookupKind(two) != null || two.equals("//")) 
-            {
-                sb.append((char) nextChar);
-                readChar();
-                return sb.toString();
+            String two = "" + first + (char) nextChar;
+            if (Token.lookupKind(two) != Token.Kind.ERROR) 
+            {  // check two-char operator
+                char second = (char) nextChar;
+                readChar(); // consume second character
+                return "" + first + second;
             }
         }
-        return sb.toString();
+
+        // single-character operator
+        return "" + first;
     }
 }

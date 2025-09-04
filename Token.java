@@ -161,14 +161,14 @@ public class Token {
         return charPos;
     }
 
-    public String lexeme () {
-        // TODO: implement
-        return null;
+    public String lexeme () 
+    {
+        return this.lexeme;
     }
 
-    public Kind kind () {
-        // TODO: implement
-        return null;
+    public Kind kind () 
+    {
+        return this.kind;
     }
 
     public boolean is(Kind k) 
@@ -185,26 +185,31 @@ public class Token {
         this.charPos = charPos;
     }
     
-    public static Kind lookupKind(String lexeme) {
+    public static Kind lookupKind(String lexeme) 
+    {
         // check for keywords, operators, etc.
         for (Kind k : Kind.values()) {
-            if (k.hasStaticLexeme() && k.defaultLexeme().equals(lexeme)) {
+            if (k.hasStaticLexeme() && k.defaultLexeme().equals(lexeme)) 
+            {
                 return k;
             }
         }
 
         // check for integer literal
-        if (lexeme.matches("\\d+")) {
+        if (lexeme.matches("\\d+")) 
+        {
             return Kind.INT_VAL;
         }
 
         // check for float literal
-        if (lexeme.matches("\\d+\\.\\d+")) {
+        if (lexeme.matches("\\d+\\.\\d+")) 
+        {
             return Kind.FLOAT_VAL;
         }
 
         // identifiers
-        if (lexeme.matches("[a-zA-Z_][a-zA-Z0-9_]*")) {
+        if (lexeme.matches("[a-zA-Z_][a-zA-Z0-9_]*")) 
+        {
             return Kind.IDENT;
         }
 
