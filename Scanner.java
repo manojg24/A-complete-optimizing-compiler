@@ -8,7 +8,6 @@ import java.io.IOException;
 
 public class Scanner implements Iterator<Token> 
 {
-
     private BufferedReader input;   // buffered reader to read file
     private boolean closed; // flag for whether reader is closed or not
 
@@ -72,7 +71,6 @@ public class Scanner implements Iterator<Token>
             return -1;
         }
     }
-
     /*
      * function to query whether or not more characters can be read
      * depends on closed and nextChar
@@ -83,14 +81,8 @@ public class Scanner implements Iterator<Token>
     {
         return nextToken != null;
     }
-
     /*
      *	returns next Token from input
-     *
-     *  invariants:
-     *  1. call assumes that nextChar is already holding an unread character
-     *  2. return leaves nextChar containing an untokenized character
-     *  3. closes reader when emitting EOF
      */
     @Override
     public Token next () 
@@ -101,17 +93,20 @@ public class Scanner implements Iterator<Token>
 
         Token current = nextToken;
 
-        if (current.kind == Token.Kind.EOF) {
+        if (current.kind == Token.Kind.EOF)
+        {
             // after returning EOF, stop further iteration
             nextToken = null;
-        } else {
+        }
+        else
+        {
             advance();  // load the next token
         }
-
         return current;
     }
 
-    private void advance() {
+    private void advance()
+    {
         if(skipWhitespaceAndComments())
         {
         	return;
@@ -124,16 +119,70 @@ public class Scanner implements Iterator<Token>
         char c = (char) nextChar;
         scan = "";
 
-        // --- Operators and punctuation (maximal munch) ---
-        if (isOperator(c)) {
-            // check if it's a negative number: '-' followed by a digit
-            if (c == '-' && Character.isDigit((char) peekNextChar())) {
-                readChar(); // consume '-'
-                scan = "-" + consumeDigits();
-                nextToken = new Token(Token.Kind.INT_VAL, scan, lineNum, charPos);
-                return;
+    	// --- Numbers (integer or float, including negative) ---
+        if (Character.isDigit(c) || (c == '-' && Character.isDigit(peekNextChar()))) 
+        {
+            StringBuilder sb = new StringBuilder();
+            boolean isFloat = false;
+
+            // Handle negative
+            if (c == '-')
+            {
+                sb.append('-');
+                readChar();
             }
 
+            // Integer part
+            while (nextChar != -1 && Character.isDigit((char) nextChar))
+            {
+                sb.append((char) nextChar);
+                readChar();
+            }
+
+            // Fractional part (must have digits after '.')
+            if (nextChar == '.') {
+                // must be ".<digit>" to be a float
+                if (Character.isDigit(peekNextChar()))
+                {
+                    isFloat = true;
+                    sb.append('.');
+                    readChar(); // consume '.'
+                    while (nextChar != -1 && Character.isDigit((char) nextChar))
+                    {
+                        sb.append((char) nextChar);
+                        readChar();
+                    }
+                } 
+                else
+                {
+                    // malformed float like "13."
+                    sb.append('.');   // include the dot in the same token
+                    readChar();       // consume the '.'
+                    nextToken = new Token(Token.Kind.ERROR,"Malformed float: " + sb.toString(), lineNum, charPos);
+                    return;
+                }
+            }
+
+            // produce token
+            nextToken = isFloat
+                ? new Token(Token.Kind.FLOAT_VAL, sb.toString(), lineNum, charPos)
+                : new Token(Token.Kind.INT_VAL, sb.toString(), lineNum, charPos);
+            return;
+        }
+        
+        // --- Identifiers / Keywords ---
+        if (Character.isLetter(c))
+        {
+            scan = consumeIdentifier();
+            Token.Kind kind = Token.lookupKind(scan);
+            if (kind == null) kind = Token.Kind.IDENT;
+            nextToken = new Token(kind, scan, lineNum, charPos);
+            return;
+        }
+
+        // --- Operators and punctuation (maximal munch) ---
+        if (isOperator(c)) 
+        {
             // consume operators (single or multi-character)
             String op = consumeOperator();
             Token.Kind kind = Token.lookupKind(op);
@@ -145,58 +194,7 @@ public class Scanner implements Iterator<Token>
             }
             return;
         }
-
-        // --- Numbers (integer or float) ---
-        if (Character.isDigit(c) || (c == '-' && Character.isDigit(peekNextChar()))) {
-            StringBuilder sb = new StringBuilder();
-            boolean isFloat = false;
-
-            // Handle negative
-            if (c == '-') {
-                sb.append('-');
-                readChar();
-            }
-
-            // Integer part
-            while (nextChar != -1 && Character.isDigit((char) nextChar)) {
-                sb.append((char) nextChar);
-                readChar();
-            }
-
-            // Fractional part
-            if (nextChar == '.') {
-                sb.append('.');
-                readChar();
-                boolean hasFraction = false;
-                while (nextChar != -1 && Character.isDigit((char) nextChar)) {
-                    sb.append((char) nextChar);
-                    readChar();
-                    hasFraction = true;
-                }
-                if (!hasFraction) {
-                    // malformed float like -17.
-                    nextToken = new Token(Token.Kind.ERROR, "ERROR", lineNum, charPos);
-                    return;
-                }
-                isFloat = true;
-            }
-
-            // produce token
-            nextToken = isFloat
-                ? new Token(Token.Kind.FLOAT_VAL, sb.toString(), lineNum, charPos)
-                : new Token(Token.Kind.INT_VAL, sb.toString(), lineNum, charPos);
-            return;
-        }
         
-        // --- Identifiers / Keywords ---
-        if (Character.isLetter(c) || c == '_') {
-            scan = consumeIdentifier();
-            Token.Kind kind = Token.lookupKind(scan);
-            if (kind == null) kind = Token.Kind.IDENT;
-            nextToken = new Token(kind, scan, lineNum, charPos);
-            return;
-        }
-
         // --- Unknown single character ---
         scan = Character.toString(c);
         readChar();
@@ -210,8 +208,10 @@ public class Scanner implements Iterator<Token>
     }
 
     // Helpers
-    private boolean isOperator(char c) {
-        switch (c) {
+    private boolean isOperator(char c)
+    {
+        switch (c)
+        {
             case '+':
             case '-':
             case '*':
@@ -253,10 +253,13 @@ public class Scanner implements Iterator<Token>
     	}
     }
     
-    private boolean skipWhitespaceAndComments() {
-        while (true) {
+    private boolean skipWhitespaceAndComments()
+    {
+        while (true)
+        {
             // Skip whitespace
-            while (nextChar != -1 && Character.isWhitespace((char) nextChar)) {
+            while (nextChar != -1 && Character.isWhitespace((char) nextChar))
+            {
                 readChar();
             }
 
@@ -267,16 +270,19 @@ public class Scanner implements Iterator<Token>
             }
 
             // Skip block comments /* ... */
-            if (nextChar == '/' && peekNextChar() == '*') {
+            if (nextChar == '/' && peekNextChar() == '*')
+            {
                 readChar(); // consume '/'
                 readChar(); // consume '*'
                 while (true) {
-                    if (nextChar == -1) {
+                    if (nextChar == -1)
+                    {
                         // EOF inside block comment → produce ERROR
                         nextToken = new Token(Token.Kind.ERROR, "ERROR", lineNum, charPos);
                         return true; // signal error
                     }
-                    if (nextChar == '*' && peekNextChar() == '/') {
+                    if (nextChar == '*' && peekNextChar() == '/')
+                    {
                         readChar(); // consume '*'
                         readChar(); // consume '/'
                         break;
@@ -285,7 +291,6 @@ public class Scanner implements Iterator<Token>
                 }
                 continue;
             }
-
             break; // no more whitespace/comments
         }
         return false; // no error found
@@ -304,12 +309,16 @@ public class Scanner implements Iterator<Token>
         return sb.toString();
     }
 
-    private String consumeIdentifier() 
+    private String consumeIdentifier()
     {
         StringBuilder sb = new StringBuilder();
+
+        // first char is guaranteed to be a letter (checked before calling)
         sb.append((char) nextChar);
         readChar();
-        while (nextChar != -1 && (Character.isLetterOrDigit((char) nextChar) || (char) nextChar == '_')) 
+
+        // allow letters, digits, underscores after the first char
+        while (nextChar != -1 && (Character.isLetterOrDigit((char) nextChar) || (char) nextChar == '_'))
         {
             sb.append((char) nextChar);
             readChar();
