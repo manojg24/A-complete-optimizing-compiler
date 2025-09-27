@@ -1,2 +1,7 @@
+<<<<<<< HEAD:PA1/test_F25_02.out
 ERROR
 EOF
+=======
+Error parsing file.
+SyntaxError(13,1)[Expected FI but got CLOSE_BRACE.]
+>>>>>>> ee763d93bf0e91f0ddfd8a9defa139183e6d0233:Test/test_F25_02.out

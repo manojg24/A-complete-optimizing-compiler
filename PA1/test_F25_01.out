@@ -1,3 +1,4 @@
+<<<<<<< HEAD:PA1/test_F25_01.out
 ADD_ASSIGN
 ADD
 DIV
@@ -8,3 +9,6 @@ MAIN
 IF
 SEMICOLON
 EOF
+=======
+Success
+>>>>>>> ee763d93bf0e91f0ddfd8a9defa139183e6d0233:Test/test_F25_01.out

@@ -1,3 +1,4 @@
+<<<<<<< HEAD:PA1/test_F25_20.out
 MAIN
 INT
 IDENT	x
@@ -22,3 +23,6 @@ MOD_ASSIGN
 INT_VAL	7
 SEMICOLON
 EOF
+=======
+Success
+>>>>>>> ee763d93bf0e91f0ddfd8a9defa139183e6d0233:Test/test_F25_20.out
