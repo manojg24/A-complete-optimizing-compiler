@@ -1,0 +1,24 @@
+// Siqi Guo
+// Test designator with relExpr containing relations and function calls
+
+main
+
+int a, b, c;
+int[10] arr;
+
+function getValue(int x): int {
+    return x * 2;
+};
+
+{
+    a = 1;
+    b = 2;
+    c = 3;
+    
+    arr[(a + b) * c] = 600;
+    arr[(a + b)] = 1;
+    arr[call getValue(a)] = 400;   
+    arr[arr[a + b]] = 500;       
+    arr[call getValue((a + b))] = 700;
+
+}.

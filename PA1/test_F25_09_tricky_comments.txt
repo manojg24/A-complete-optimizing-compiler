@@ -1,0 +1,14 @@
+// Alex Beamer
+// Comments formats that are unusual but possible
+
+main
+/* this is a comment which
+will include another /* and
+then there is a //*/
+do
+// /* */ this is still junk
+if
+/* sometimes a single line comment */// immediately follows a block comment
+od
+/*/ this is still a comment */
+while

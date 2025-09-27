@@ -1,0 +1,13 @@
+// Cameron Ederhoff
+// boolean expressions using "and" and "or"
+
+main
+
+bool a, b, c;
+{
+    a = false;
+    b = true;
+    c = a and b;
+    b = c or a;
+    a = b and c;
+}.

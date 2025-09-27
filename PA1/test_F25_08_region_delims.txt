@@ -1,0 +1,5 @@
+// author: Macsen Casaus
+// This test is meant to test recognition of regional delimeters:
+// '(', ')', '{', etc.
+
+(){}[](}(]{)[)[1] // (())

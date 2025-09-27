@@ -1,0 +1,3 @@
+// Operator recognition/maximal munch, no whitespace
+
+*^/%and+-or==!=<<=>>==+=-=*=/=%=^=++--

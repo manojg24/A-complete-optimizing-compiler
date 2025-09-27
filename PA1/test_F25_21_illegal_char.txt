@@ -1,0 +1,9 @@
+// Author : Yu Zhong
+// This is used to test illegal/unknown characters & ERROR.
+
+double dollar$ign = 1.02;      // Listed signs below are illegal
+int email@name = 2;      
+int hash#tag = 3;       
+int back\slash = 4;      
+int twoDots = 1..1;     
+int mix = 7$8;           

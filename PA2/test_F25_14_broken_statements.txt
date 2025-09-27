@@ -1,0 +1,14 @@
+// Andy Chiu
+// broken statements
+
+main {
+	int x;
+	x += 123 + call abc(x);
+/*
+
+}
+
+*/
+	x = 1; x = 2; // missing ';' in statement. Comment this to test following
+	return call main(x, x + 1, x = 1) // there shouldn't be a statement in arg list
+}

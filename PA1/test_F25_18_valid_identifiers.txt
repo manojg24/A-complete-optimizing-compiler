@@ -1,0 +1,7 @@
+//author: Hannah Lucas
+//purpose: testing if scanner correctly processes identifiers with non-alphabet characters
+
+int alien89alien = 9;
+int if_if;
+float y__ = 10.8;
+

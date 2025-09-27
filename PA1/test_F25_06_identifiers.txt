@@ -1,0 +1,6 @@
+// author: Aiden Loyd
+// This test case tests different identifiers, both reserved and custom (do vs. randomVariable). We want to test identifiers that contain reserved keywords and ensure that they are read correctly (dothis is a custom identifier).
+
+do dothis main mainfunction testfunction
+repeat return and or not
+od call fi

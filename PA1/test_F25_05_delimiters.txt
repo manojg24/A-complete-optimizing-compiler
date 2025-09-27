@@ -1,0 +1,6 @@
+// author: William Tatum
+// This test case tests the period and comma tokens, it should recognize the tokens (does not include :)
+
+-12.4.
+hello, 14
+world.

@@ -1,0 +1,17 @@
+// Andrew Li
+// tests well formed 'repeat until' statement
+
+main
+
+int x;
+
+function repeatUntil(): void {
+	x = 0;
+   	repeat 
+   		x ++;
+   	until (x == 10);
+};
+
+{
+   	call repeatUntil();
+}.

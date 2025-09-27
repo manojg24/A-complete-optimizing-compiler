@@ -1,0 +1,7 @@
+// Nitish Malluru
+// Testing leading underscores and leading numbers in identifiers
+
+_abc123
+_123abc
+abc_123_
+123_abc

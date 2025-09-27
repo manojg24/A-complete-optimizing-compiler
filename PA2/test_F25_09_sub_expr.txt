@@ -1,0 +1,4 @@
+main
+{
+ call printBool(4-3); // this must pass, no error here   
+}.

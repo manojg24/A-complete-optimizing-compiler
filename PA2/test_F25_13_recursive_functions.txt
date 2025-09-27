@@ -1,0 +1,35 @@
+// Aiden Loyd
+// Tests that recursive functions (both self and mutual) are properly handled.
+// This should succeed.
+
+main
+
+function isOdd(int number): boolean {
+	if (number == 0) then
+		return false;
+	else
+		return isEven(number - 1);
+	fi
+}
+
+function isEven(int number): boolean {
+	if (number == 0) then
+		return false;
+	else
+		return isOdd(number - 1);
+	fi
+}
+
+function pow(int number, int exp): int {
+	if (exp == 0) then
+		return 1;
+	else
+		return number * call pow(number, exp - 1);
+	fi
+}
+
+{
+	call printBool(call isEven(3));
+	call printBool(call isEven(4));
+	call printInt(call pow(2, 3));
+}.

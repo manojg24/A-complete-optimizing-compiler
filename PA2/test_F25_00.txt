@@ -1,0 +1,30 @@
+main
+
+int a, b;
+
+float c;
+
+bool d;
+
+{
+	a = 4;
+	b = 9;
+	c = -12.6;
+	
+	b *= a;
+	a = b / a;
+	b /= a;
+	
+	// both or nodes should come before the
+	// and node in the parse tree 
+	d = false or false and true or false;
+	
+	if (true != d == true) then
+		// we should always make it in here
+		// if left or right associative
+		b = 2;
+	else
+		a = 2;
+	fi;
+	
+}.

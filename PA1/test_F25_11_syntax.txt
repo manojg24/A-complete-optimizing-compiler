@@ -1,0 +1,14 @@
+// Author: Mason Roberson
+// This tests multiple wrong syntaxs assigned to variables
+// Or used in equations
+
+float doubleperiod1 = 13..1;
+float doubleperiod2 = 87.0.9;
+float wrongsign = -.34;
+float moneyfloat = 1.$;
+float hashtagfloat = 4#.9;
+int moneynumber = $4;
+
+float expression1 = 12 + 34.1 + 1..9 + 8.3.1;
+float expression2 = $.8 + -0.7 + #.12;
+

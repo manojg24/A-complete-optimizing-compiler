@@ -1,0 +1,17 @@
+// author: Gabriel De Conto
+// tests incomplete/incorrect repeat
+
+main
+
+int l, m;
+
+{
+	l = 20;
+	m = 40;
+	
+	repeat 
+   		l = l + m;
+   	(l >= 100);
+	
+	call printInt(l);
+}.
