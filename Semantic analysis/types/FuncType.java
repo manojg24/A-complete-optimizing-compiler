@@ -54,14 +54,22 @@ public class FuncType extends Type {
             return new ErrorType("Cannot call a function with a non-list type: " + args);
         }
 
-        TypeList argTypes = (TypeList) args;
+        TypeList actuals = (TypeList) args;
 
-        // Use the equivalent method we defined in TypeList to check if the arguments match
-        if (this.params.equivalent(argTypes)) {
-            return this.returnType; // Success! Return the function's declared return type.
+        if (actuals.size() != this.params.size()) {
+            return new ErrorType("Call with args " + args + " does not match function signature " + this + ".");
         }
 
-        return new ErrorType("Call with args " + args + " does not match function signature " + this + ".");
+        // Use assign(formal <- actual), which lets ArrayType handle [-1] wildcards.
+        for (int i = 0; i < params.size(); i++) {
+            Type formal = params.get(i);
+            Type actual = actuals.get(i);
+            Type ok = formal.assign(actual);
+            if (ok instanceof ErrorType) {
+                return new ErrorType("Call with args " + args + " does not match function signature " + this + ".");
+            }
+        }
+        return this.returnType;
     }
 
 }

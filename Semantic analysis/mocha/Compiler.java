@@ -216,39 +216,56 @@ public class Compiler {
     // Grammar Rules ==============================================================
 
     private Computation computation() {
-        Token mainToken = expectRetrieve(Token.Kind.MAIN);
-
-        DeclarationList varDecls = new DeclarationList(lineNumber(), charPosition());
-        while (have(NonTerminal.VAR_DECL) && !have(Token.Kind.FUNC)) {
-        	List<Declaration> declsForThisLine = varDecl();        // returns List<Declaration>
-            for (Declaration d : declsForThisLine)
-                varDecls.add(d);
-        }
-
+        // Collect any function declarations that appear before 'main'
         DeclarationList funcDecls = new DeclarationList(lineNumber(), charPosition());
         while (have(NonTerminal.FUNC_DECL)) {
             funcDecls.add(funcDecl());
         }
 
+        // Now we must see 'main'
+        Token mainToken = expectRetrieve(Token.Kind.MAIN);
+
+        // Globals (after 'main' per your original grammar)
+        DeclarationList varDecls = new DeclarationList(lineNumber(), charPosition());
+        while (have(NonTerminal.VAR_DECL) && !have(Token.Kind.FUNC)) {
+            List<Declaration> declsForThisLine = varDecl();
+            for (Declaration d : declsForThisLine) varDecls.add(d);
+        }
+
+        // Also allow more function decls after the globals (merge into same list)
+        while (have(NonTerminal.FUNC_DECL)) {
+            funcDecls.add(funcDecl());
+        }
+
+        // Main block
         expect(Token.Kind.OPEN_BRACE);
         StatementSequence mainBody = statSeq();
         expect(Token.Kind.CLOSE_BRACE);
         expect(Token.Kind.PERIOD);
         expect(Token.Kind.EOF);
 
-        return new Computation(mainToken.lineNumber(), mainToken.charPosition(), new Symbol("main", new FuncType(new TypeList(), new VoidType())), varDecls, funcDecls, mainBody);
+        return new Computation(
+            mainToken.lineNumber(),
+            mainToken.charPosition(),
+            new Symbol("main", new FuncType(new TypeList(), new VoidType())),
+            varDecls,
+            funcDecls,
+            mainBody
+        );
     }
 
     private List<Declaration> varDecl() {
-        Node baseTypeNode = typeDecl();
+        // get the concrete (syntactic) type directly
+        AST.TypeNode baseTypeNode = (AST.TypeNode) typeDecl();
         List<Declaration> decls = new ArrayList<>();
 
         do {
             Token identToken = expectRetrieve(Token.Kind.IDENT);
             Identifier id = new Identifier(identToken.lineNumber(), identToken.charPosition(), identToken.lexeme());
 
-            // Handle per-variable array brackets (int a[5], b[], c;)
-            Type varType = baseTypeNode.getType();
+            Type varType = baseTypeNode.getActualType(); // ✅ not null
+
+            // Per-variable brackets: int a[5], b[], c;
             while (accept(Token.Kind.OPEN_BRACKET)) {
                 int size = -1;
                 if (have(Token.Kind.INT_VAL)) {
@@ -259,7 +276,7 @@ public class Compiler {
                 varType = new ArrayType(size, varType);
             }
 
-            Node typeNode = new AST.TypeNode(baseTypeNode.lineNumber(), baseTypeNode.charPosition(), varType);
+            AST.TypeNode typeNode = new AST.TypeNode(baseTypeNode.lineNumber(), baseTypeNode.charPosition(), varType);
             tryDeclareVariable(identToken, varType);
             decls.add(new VariableDeclaration(baseTypeNode.lineNumber(), baseTypeNode.charPosition(), id, typeNode));
 
@@ -335,7 +352,13 @@ public class Compiler {
         expect(Token.Kind.CLOSE_PAREN);
 
         expect(Token.Kind.COLON);
-        Node returnTypeNode = typeDecl();
+        Node returnTypeNode;
+        if (have(Token.Kind.VOID)) {
+            Token voidTok = expectRetrieve(Token.Kind.VOID);
+            returnTypeNode = new AST.TypeNode(voidTok.lineNumber(), voidTok.charPosition(), new VoidType());
+        } else {
+            returnTypeNode = typeDecl(); // int/float/bool and optional []s
+        }
         
         FunctionBody body = funcBody();
         expect(Token.Kind.SEMICOLON);
@@ -363,6 +386,7 @@ public class Compiler {
     
     private FunctionBody funcBody() {
         expect(Token.Kind.OPEN_BRACE);
+        enterScope();
         DeclarationList decls = new DeclarationList(lineNumber(), charPosition());
         while(have(NonTerminal.VAR_DECL)) {
             List<Declaration> declsThisLine = varDecl();
@@ -370,6 +394,7 @@ public class Compiler {
                 decls.add(d);
         }
         StatementSequence stmts = statSeq();
+        exitScope();
         expect(Token.Kind.CLOSE_BRACE);
         return new FunctionBody(decls.lineNumber(), decls.charPosition(), decls, stmts);
     }

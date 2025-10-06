@@ -62,10 +62,9 @@ public class SymbolTable {
     /**
      * Exits the current scope by popping the top HashMap from the stack.
      */
-    public void exitScope()
-    {
-        if (!table.isEmpty())
-        {
+    public void exitScope() {
+        // Don't ever pop the global scope
+        if (table.size() > 1) {
             table.pop();
         }
     }
