@@ -243,6 +243,14 @@ public class PrettyPrinter implements NodeVisitor {
             builder.append("nullType");
         }
     }
+    
+    @Override
+    public void visit(UnaryMinus unaryMinus) {
+        println("UnaryMinus");
+        indent++;
+        unaryMinus.getExpr().accept(this);
+        indent--;
+    }
 
     // Add remaining stubs to satisfy the interface
     @Override public void visit(Dereference node) { println("Dereference"); }

@@ -39,6 +39,14 @@ public class SymbolTable {
 	        // Built-in: readFloat(): float
 	        FuncType readFloatType = new FuncType(new TypeList(), new FloatType());
 	        insert("readFloat", readFloatType);
+	        
+	    	// println(): void
+	        FuncType printlnType = new FuncType(new TypeList(), new VoidType());
+	        insert("println", printlnType);
+
+	        // readBool(): bool
+	        FuncType readBoolType = new FuncType(new TypeList(), new BoolType());
+	        insert("readBool", readBoolType);
 
 	    } catch (RedeclarationError e) {
 	        // Should never happen with predefined functions

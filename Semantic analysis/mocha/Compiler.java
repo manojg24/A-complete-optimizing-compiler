@@ -240,22 +240,30 @@ public class Compiler {
     }
 
     private List<Declaration> varDecl() {
-        Node typeNode = typeDecl();
+        Node baseTypeNode = typeDecl();
         List<Declaration> decls = new ArrayList<>();
 
-        // At least one identifier
-        Token identToken = expectRetrieve(Token.Kind.IDENT);
-        Identifier id = new Identifier(identToken.lineNumber(), identToken.charPosition(), identToken.lexeme());
-        tryDeclareVariable(identToken, typeNode.getType());
-        decls.add(new VariableDeclaration(typeNode.lineNumber(), typeNode.charPosition(), id, typeNode));
+        do {
+            Token identToken = expectRetrieve(Token.Kind.IDENT);
+            Identifier id = new Identifier(identToken.lineNumber(), identToken.charPosition(), identToken.lexeme());
 
-        // Handle comma-separated identifiers
-        while (accept(Token.Kind.COMMA)) {
-            identToken = expectRetrieve(Token.Kind.IDENT);
-            id = new Identifier(identToken.lineNumber(), identToken.charPosition(), identToken.lexeme());
-            tryDeclareVariable(identToken, typeNode.getType());
-            decls.add(new VariableDeclaration(typeNode.lineNumber(), typeNode.charPosition(), id, typeNode));
-        }
+            // Handle per-variable array brackets (int a[5], b[], c;)
+            Type varType = baseTypeNode.getType();
+            while (accept(Token.Kind.OPEN_BRACKET)) {
+                int size = -1;
+                if (have(Token.Kind.INT_VAL)) {
+                    Token sizeToken = expectRetrieve(Token.Kind.INT_VAL);
+                    size = Integer.parseInt(sizeToken.lexeme());
+                }
+                expect(Token.Kind.CLOSE_BRACKET);
+                varType = new ArrayType(size, varType);
+            }
+
+            Node typeNode = new AST.TypeNode(baseTypeNode.lineNumber(), baseTypeNode.charPosition(), varType);
+            tryDeclareVariable(identToken, varType);
+            decls.add(new VariableDeclaration(baseTypeNode.lineNumber(), baseTypeNode.charPosition(), id, typeNode));
+
+        } while (accept(Token.Kind.COMMA));
 
         expect(Token.Kind.SEMICOLON);
         return decls;
@@ -263,10 +271,9 @@ public class Compiler {
     
     private Node typeDecl() {
         Token typeToken = currentToken;
-        final Type actualType;  // must be final for inner use
-        Node typeNode;
+        Type actualType;
 
-        // base type
+        // Base types
         if (accept(Token.Kind.INT)) {
             actualType = new IntType();
         } else if (accept(Token.Kind.FLOAT)) {
@@ -277,18 +284,39 @@ public class Compiler {
             throw new QuitParseException(reportSyntaxError(NonTerminal.TYPE_DECL));
         }
 
-        // use a TypeNode wrapper from AST
-        typeNode = new AST.TypeNode(typeToken.lineNumber(), typeToken.charPosition(), actualType);
+        // Start with a base TypeNode
+        AST.TypeNode typeNode = new AST.TypeNode(
+                typeToken.lineNumber(),
+                typeToken.charPosition(),
+                actualType
+        );
 
-        // handle arrays
+        // Handle array brackets and nested dimensions
         while (accept(Token.Kind.OPEN_BRACKET)) {
-            Token extentToken = expectRetrieve(Token.Kind.INT_VAL);
-            int extent = Integer.parseInt(extentToken.lexeme());
+            boolean negative = false;
+            int size = -1; // -1 means unspecified array size (like int[])
+
+            if (accept(Token.Kind.SUB)) {  // allows negative sizes like [-5]
+                negative = true;
+            }
+
+            if (have(Token.Kind.INT_VAL)) {
+                Token sizeToken = expectRetrieve(Token.Kind.INT_VAL);
+                size = Integer.parseInt(sizeToken.lexeme());
+                if (negative) size = -size;
+            }
+
             expect(Token.Kind.CLOSE_BRACKET);
 
-            // wrap in ArrayType
-            Type arrayType = new ArrayType(extent, typeNode.getType());
-            typeNode.setType(arrayType);
+            // Wrap existing type inside a new ArrayType
+            actualType = new ArrayType(size, actualType);
+
+            // Update typeNode to wrap the most recent ArrayType
+            typeNode = new AST.TypeNode(
+                    typeToken.lineNumber(),
+                    typeToken.charPosition(),
+                    actualType
+            );
         }
 
         return typeNode;
@@ -310,22 +338,26 @@ public class Compiler {
         Node returnTypeNode = typeDecl();
         
         FunctionBody body = funcBody();
+        expect(Token.Kind.SEMICOLON);
         
         return new FunctionDeclaration(funcToken.lineNumber(), funcToken.charPosition(), id, params, returnTypeNode, body);
     }
 
     private List<FormalParameter> formalParams() {
         List<FormalParameter> params = new ArrayList<>();
-        
-        Node typeNode = typeDecl();
-        Token identToken = expectRetrieve(Token.Kind.IDENT);
-        params.add(new FormalParameter(identToken.lineNumber(), identToken.charPosition(), new Identifier(identToken.lineNumber(), identToken.charPosition(), identToken.lexeme()), typeNode));
-        
-        while(accept(Token.Kind.COMMA)) {
-            typeNode = typeDecl();
-            identToken = expectRetrieve(Token.Kind.IDENT);
-            params.add(new FormalParameter(identToken.lineNumber(), identToken.charPosition(), new Identifier(identToken.lineNumber(), identToken.charPosition(), identToken.lexeme()), typeNode));
-        }
+
+        // Caller guarantees we're not at CLOSE_PAREN yet; parse one or more: TYPE IDENT ( , TYPE IDENT )*
+        do {
+            AST.TypeNode typeNode = (AST.TypeNode) typeDecl();      // type only (int/float/bool + [] groups)
+            Token identToken = expectRetrieve(Token.Kind.IDENT);     // then IDENT
+            Identifier id = new Identifier(identToken.lineNumber(), identToken.charPosition(), identToken.lexeme());
+
+            params.add(new FormalParameter(identToken.lineNumber(),
+                                           identToken.charPosition(),
+                                           id,
+                                           typeNode));
+        } while (accept(Token.Kind.COMMA));
+
         return params;
     }
     
@@ -349,10 +381,13 @@ public class Compiler {
                !have(Token.Kind.OD) &&
                !have(Token.Kind.FI) &&
                !have(Token.Kind.ELSE) &&
-               !have(Token.Kind.EOF)) 
-        {
-            if (have(NonTerminal.STATEMENT)) {
-                seq.add(statement());
+               !have(Token.Kind.EOF)) {
+        	if (accept(Token.Kind.SEMICOLON)) {
+                continue;
+            }
+            if (have(NonTerminal.STATEMENT) || have(Token.Kind.SEMICOLON)) {
+            	Statement s = statement(); 
+                if (s != null) seq.add(s); 
             } else {
                 // Skip invalid token and report error instead of crashing
                 String errorMessage = "Unexpected token '" + currentToken.lexeme() +
@@ -454,7 +489,8 @@ public class Compiler {
         if (accept(Token.Kind.ELSE)) {
             elseBlock = statSeq();
         }
-        expect(Token.Kind.FI);  // FI ends the block, no semicolon
+        expect(Token.Kind.FI);
+        accept(Token.Kind.SEMICOLON);
         return new IfStatement(ifToken.lineNumber(), ifToken.charPosition(), condition, thenBlock, elseBlock);
     }
 
@@ -481,8 +517,9 @@ public class Compiler {
     private StatementSequence statSeqUntil(Token.Kind stopToken) {
         StatementSequence seq = new StatementSequence(lineNumber(), charPosition());
         while (!have(stopToken) && !have(Token.Kind.EOF)) {
-            if (have(NonTerminal.STATEMENT)) {
-                seq.add(statement());
+            if (have(NonTerminal.STATEMENT) || have(Token.Kind.SEMICOLON)) {
+            	Statement s = statement();
+                if (s != null) seq.add(s);
             } else {
                 // skip invalid tokens
                 errorBuffer.append("SyntaxError(" + lineNumber() + "," + charPosition() + ")[Unexpected token '" + currentToken.lexeme() + "']\n");
@@ -587,13 +624,28 @@ public class Compiler {
     	if (have(Token.Kind.CALL)) {
             return funcCall();
         }
-        if (have(Token.Kind.IDENT)) {
-            Token identToken = expectRetrieve(Token.Kind.IDENT);
-            if (have(Token.Kind.OPEN_PAREN)) {   // function call without 'call'
-                return parseFuncCall(identToken);
-            }
-            return new Identifier(identToken.lineNumber(), identToken.charPosition(), identToken.lexeme());
-        } 
+    	if (have(Token.Kind.SUB)) {  // handle unary minus
+            Token op = expectRetrieve(Token.Kind.SUB);
+            Expression right = factor(); // recursive call for unary
+            return new UnaryMinus(op.lineNumber(), op.charPosition(), right);
+        }
+    	if (have(Token.Kind.IDENT)) {
+    	    Token identToken = expectRetrieve(Token.Kind.IDENT);
+
+    	    // function call without 'call'
+    	    if (have(Token.Kind.OPEN_PAREN)) {
+    	        return parseFuncCall(identToken);
+    	    }
+
+    	    // r-value designator: IDENT [expr]...
+    	    Expression d = new Identifier(identToken.lineNumber(), identToken.charPosition(), identToken.lexeme());
+    	    while (accept(Token.Kind.OPEN_BRACKET)) {
+    	        Expression index = expression();
+    	        expect(Token.Kind.CLOSE_BRACKET);
+    	        d = new ArrayIndex(d.lineNumber(), d.charPosition(), d, index);
+    	    }
+    	    return d;
+    	}
         if (have(Token.Kind.INT_VAL)) {
             Token tok = expectRetrieve(Token.Kind.INT_VAL);
             return new IntegerLiteral(tok.lineNumber(), tok.charPosition(), Integer.parseInt(tok.lexeme()));

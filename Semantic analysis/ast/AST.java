@@ -390,4 +390,17 @@ public class AST implements Visitable {
             visitor.visit(this);
         }
     }
+    
+    public static class UnaryMinus extends Node implements Expression {
+        private Expression expr;
+        public UnaryMinus(int line, int col, Expression expr) {
+            super(line, col);
+            this.expr = expr;
+        }
+        public Expression getExpr() { return expr; }
+        @Override
+        public void accept(NodeVisitor visitor) { 
+        	visitor.visit(this); 
+        	}
+    }
 }

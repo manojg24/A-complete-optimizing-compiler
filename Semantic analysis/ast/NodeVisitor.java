@@ -57,4 +57,6 @@ public interface NodeVisitor {
     public void visit (Computation node);
     public void visit (Identifier node);
     public void visit (TypeNode typeNode);
+    public void visit (UnaryMinus unaryMinus);
+    
 }
