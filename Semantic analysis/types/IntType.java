@@ -50,7 +50,7 @@ public class IntType extends Type {
     @Override
     public Type assign(Type source) {
         // You can assign an int to an int or a float
-        if (source instanceof IntType || source instanceof FloatType) {
+        if (source instanceof IntType) {
             return this;
         }
         return super.assign(source);

@@ -88,6 +88,11 @@ public class TypeChecker implements NodeVisitor {
 
         Type leftType = left.getType();
         Type rightType = right.getType();
+        
+        if (leftType instanceof ErrorType || rightType instanceof ErrorType) {
+            node.setType(new ErrorType("Propagated type error."));
+            return;
+        }
 
         if (leftType == null)  leftType  = new ErrorType("Unresolved left operand.");
         if (rightType == null) rightType = new ErrorType("Unresolved right operand.");
@@ -119,32 +124,49 @@ public class TypeChecker implements NodeVisitor {
 
     @Override
     public void visit(Computation node) {
-        // (a) Predeclare all functions using mangled names
+        // (0) Make globals visible to function bodies
+        node.variables().accept(this);
+
+        // (1) Predeclare all functions with both mangled and base names
         for (Declaration d : node.functions()) {
             if (d instanceof AST.FunctionDeclaration fd) {
+
+                // Build the parameter typelist and ensure TypeNodes are set
                 TypeList tl = new TypeList();
                 for (AST.FormalParameter p : fd.getParameters()) {
                     p.getTypeNode().accept(this);
                     tl.append(p.getTypeNode().getType());
                 }
+                // Resolve return type
                 fd.getReturnType().accept(this);
                 Type ret = fd.getReturnType().getType();
                 FuncType fty = new FuncType(tl, ret);
 
+                // Mangled name for exact overload match
                 java.util.List<Type> paramList = new java.util.ArrayList<>();
                 for (AST.FormalParameter p : fd.getParameters()) {
                     paramList.add(p.getTypeNode().getType());
                 }
-                String mangled = mangleFunc(fd.getIdentifier().getName(), paramList);
-                try { table.insert(mangled, fty); }
-                catch (Throwable e) { reportError(fd.lineNumber(), fd.charPosition(), e.getMessage()); }
+                String base = fd.getIdentifier().getName();
+                String mangled = mangleFunc(base, paramList);
+
+                try {
+                    table.insert(mangled, fty);
+                } catch (Throwable e) {
+                    reportError(fd.lineNumber(), fd.charPosition(), e.getMessage());
+                }
+
+                // Also insert the plain base name ONCE (for fallback mismatch diagnostics)
+                try {
+                    table.lookup(base); // already present? fine
+                } catch (Throwable nf) {
+                    try { table.insert(base, fty); }
+                    catch (Throwable ignore) { /* okay if another file inserted it */ }
+                }
             }
         }
 
-        // (b) Now declare globals
-        node.variables().accept(this);
-
-        // (c) Then type-check function bodies and main
+        // (2) Now type-check function bodies and main
         node.functions().accept(this);
         node.mainStatementSequence().accept(this);
         node.setType(new VoidType());
@@ -178,6 +200,16 @@ public class TypeChecker implements NodeVisitor {
             node.setType(new ErrorType("Symbol not found."));
         }
     }
+    
+    private String extractRootIdent(Expression e) {
+        while (e instanceof AST.ArrayIndex) {
+            e = ((AST.ArrayIndex) e).getBase();
+        }
+        if (e instanceof AST.Identifier) {
+            return ((AST.Identifier) e).getName();
+        }
+        return null;
+    }
 
     @Override
     public void visit(ArrayIndex node) {
@@ -191,6 +223,23 @@ public class TypeChecker implements NodeVisitor {
         // Prevent nulls from reaching Type#index(...)
         if (baseType == null)  baseType  = new ErrorType("Unresolved array base.");
         if (indexType == null) indexType = new ErrorType("Unresolved array index.");
+        
+        if (baseType instanceof ArrayType arr
+                && indexType instanceof IntType
+                && node.getIndex() instanceof AST.IntegerLiteral lit) {
+
+                int extent = arr.getExtent();    // only meaningful when >= 0
+                int idx    = lit.getValue();
+                if (extent >= 0 && (idx < 0 || idx >= extent)) {
+                	String arrName = extractRootIdent(node.getBase());
+                	String msg = "Array Index Out of Bounds : " + idx +
+                	             " for array " + (arrName != null ? arrName : "array");
+                    // point exactly at the index literal
+                    reportError(lit.lineNumber(), lit.charPosition(), msg);
+                    node.setType(new ErrorType(msg));
+                    return; // stop here; we've produced the specific error already
+                }
+            }
 
         Type resultType = baseType.index(indexType);
 
@@ -286,6 +335,12 @@ public class TypeChecker implements NodeVisitor {
         node.getSource().accept(this);
         Type destType = node.getDestination().getType();
         Type sourceType = node.getSource().getType();
+        
+        if (destType instanceof ErrorType || sourceType instanceof ErrorType) {
+            node.setType(new VoidType());
+            return;
+        }
+
         if (destType == null) destType = new ErrorType("Unresolved LHS.");
         if (sourceType == null) sourceType = new ErrorType("Unresolved RHS.");
         
@@ -324,7 +379,7 @@ public class TypeChecker implements NodeVisitor {
         Type condType = node.getCondition().getType();
 
         if (!(condType instanceof BoolType)) {
-            reportError(node.lineNumber(), node.charPosition(), "WhileStat requires a bool condition, not " + shortName(condType) + ".");
+            reportError(node.lineNumber(), node.charPosition(), "WhileStat requires a bool condition not " + shortName(condType) + ".");
         }
 
         table.enterScope();
@@ -343,7 +398,7 @@ public class TypeChecker implements NodeVisitor {
         Type condType = node.getCondition().getType();
 
         if (!(condType instanceof BoolType)) {
-            reportError(node.lineNumber(), node.charPosition(), "RepeatStat requires a bool condition, not " + shortName(condType) + ".");
+            reportError(node.lineNumber(), node.charPosition(), "RepeatStat requires a bool condition not " + shortName(condType) + ".");
         }
         node.setType(new VoidType());
     }
@@ -507,7 +562,8 @@ public class TypeChecker implements NodeVisitor {
         Type varType = node.getTypeNode().getType();
 
         // Check for invalid array sizes
-        checkArrayDimensions(varType, node.lineNumber(), node.charPosition(), node.getIdentifier().getName());
+        AST.Identifier id = node.getIdentifier();
+        checkArrayDimensions(varType, id.lineNumber(), id.charPosition(), id.getName());
 
         try {
             Symbol sym = table.insert(node.getIdentifier().getName(), varType);

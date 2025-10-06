@@ -296,7 +296,7 @@ public class AST implements Visitable {
         @Override public void accept(NodeVisitor v) { v.visit(this); }
     }
 
-    public static class VariableDeclaration extends Declaration {
+    public static class VariableDeclaration extends Declaration implements Statement{
         private final Identifier identifier;
         private final Node typeNode;
         public VariableDeclaration(int l, int c, Identifier id, Node type) { super(l,c); this.identifier=id; this.typeNode=type; }

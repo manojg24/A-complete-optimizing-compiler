@@ -275,6 +275,9 @@ public class Compiler {
                 expect(Token.Kind.CLOSE_BRACKET);
                 varType = new ArrayType(size, varType);
             }
+            if (accept(Token.Kind.ASSIGN)) {
+                expression();
+            }
 
             AST.TypeNode typeNode = new AST.TypeNode(baseTypeNode.lineNumber(), baseTypeNode.charPosition(), varType);
             tryDeclareVariable(identToken, varType);
@@ -407,6 +410,15 @@ public class Compiler {
                !have(Token.Kind.FI) &&
                !have(Token.Kind.ELSE) &&
                !have(Token.Kind.EOF)) {
+        	
+        	if (have(NonTerminal.VAR_DECL)) {
+                List<Declaration> decls = varDecl();
+                for (Declaration d : decls) {
+                    seq.add((Statement) d);  // VariableDeclaration now implements Statement
+                }
+                continue;
+            }
+        	
         	if (accept(Token.Kind.SEMICOLON)) {
                 continue;
             }
@@ -542,6 +554,13 @@ public class Compiler {
     private StatementSequence statSeqUntil(Token.Kind stopToken) {
         StatementSequence seq = new StatementSequence(lineNumber(), charPosition());
         while (!have(stopToken) && !have(Token.Kind.EOF)) {
+        	if (have(NonTerminal.VAR_DECL)) {
+                List<Declaration> decls = varDecl();
+                for (Declaration d : decls) {
+                    seq.add((Statement) d);  // VariableDeclaration now implements Statement
+                }
+                continue;
+            }
             if (have(NonTerminal.STATEMENT) || have(Token.Kind.SEMICOLON)) {
             	Statement s = statement();
                 if (s != null) seq.add(s);
