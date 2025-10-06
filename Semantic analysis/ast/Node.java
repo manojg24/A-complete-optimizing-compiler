@@ -40,6 +40,28 @@ public abstract class Node implements Visitable {
     public String toString () {
         return this.getClass().getSimpleName();
     }
+    
+    public static class TypeNode extends Node {
+        private Type type;
+
+        public TypeNode(int line, int col, Type type) {
+            super(line, col);
+            this.type = type;
+        }
+
+        @Override
+        public void accept(NodeVisitor v) {
+            // Can be empty if visitors don't process TypeNode
+        }
+
+        public Type getType() {
+            return type;
+        }
+            
+            public void setType(Type t) {
+                this.type = t;
+        }
+    }
 
     // Some factory methods for convenience
     public static Statement newAssignment (int lineNum, int charPos, Expression dest, Token assignOp, Expression src) {

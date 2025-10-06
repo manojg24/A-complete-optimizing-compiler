@@ -9,27 +9,42 @@ public class SymbolTable {
     // TODO: Create Symbol Table structure
 	private Stack<Map<String, Symbol>> table;
 
-    public SymbolTable () {
-    	this.table = new Stack<>();
-        enterScope(); // Enter the global scope
+	public SymbolTable () {
+	    this.table = new Stack<>();
+	    enterScope(); // Enter the global scope
 
-        TypeList printIntParams = new TypeList();
-        printIntParams.add(new IntType());
-        FuncType printIntType = new FuncType(printIntParams, new VoidType());
-        Symbol printIntSymbol = new Symbol("printInt", printIntType);
-        
-        FuncType readIntType = new FuncType(new TypeList(), new IntType());
-        Symbol readIntSymbol = new Symbol("readInt", readIntType);
+	    try {
+	        // Built-in: printInt(int)
+	        TypeList printIntParams = new TypeList();
+	        printIntParams.append(new IntType());
+	        FuncType printIntType = new FuncType(printIntParams, new VoidType());
+	        insert("printInt", printIntType);
 
-        try {
-            // Insert predefined symbols into the global scope
-            insert(printIntSymbol);
-            insert(readIntSymbol);
-        } catch (RedeclarationError e) {
-            // This should never happen with predefined functions
-            e.printStackTrace();
-        }
-    }
+	        // Built-in: printFloat(float)
+	        TypeList printFloatParams = new TypeList();
+	        printFloatParams.append(new FloatType());
+	        FuncType printFloatType = new FuncType(printFloatParams, new VoidType());
+	        insert("printFloat", printFloatType);
+
+	        // Built-in: printBool(bool)
+	        TypeList printBoolParams = new TypeList();
+	        printBoolParams.append(new BoolType());
+	        FuncType printBoolType = new FuncType(printBoolParams, new VoidType());
+	        insert("printBool", printBoolType);
+
+	        // Built-in: readInt(): int
+	        FuncType readIntType = new FuncType(new TypeList(), new IntType());
+	        insert("readInt", readIntType);
+
+	        // Built-in: readFloat(): float
+	        FuncType readFloatType = new FuncType(new TypeList(), new FloatType());
+	        insert("readFloat", readFloatType);
+
+	    } catch (RedeclarationError e) {
+	        // Should never happen with predefined functions
+	        e.printStackTrace();
+	    }
+	}
     
     public void enterScope()
     {

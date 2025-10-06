@@ -398,4 +398,22 @@ public class TypeChecker implements NodeVisitor {
         }
         node.setType(new VoidType());
     }
+    
+    @Override
+    public void visit(Identifier node) {
+        try {
+            Symbol symbol = table.lookup(node.getName());
+            node.setSymbol(symbol);
+            node.setType(symbol.type());
+        } catch (Exception e) {
+            reportError(node.lineNumber(), node.charPosition(), "Symbol not found: " + node.getName());
+            node.setType(new ErrorType("Symbol not found."));
+        }
+    }
+    
+    @Override
+    public void visit(AST.TypeNode typeNode) {
+        // Example: propagate the type
+        typeNode.setType(typeNode.getActualType());
+    }
 }

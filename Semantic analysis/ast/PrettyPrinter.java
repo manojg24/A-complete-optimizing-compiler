@@ -5,6 +5,15 @@ public class PrettyPrinter implements NodeVisitor {
 
     private final StringBuilder sb = new StringBuilder();
     private int indent = 0;
+    private final StringBuilder builder;
+    public PrettyPrinter() {
+        builder = new StringBuilder();
+    }
+    public String print(Node node) {
+        builder.setLength(0); // reset
+        node.accept(this);
+        return builder.toString();
+    }
 
     // Public method to start the printing process
     public String print(Visitable ast) {
@@ -218,6 +227,21 @@ public class PrettyPrinter implements NodeVisitor {
     @Override
     public void visit(BoolLiteral node) {
         println("BoolLiteral(" + node.getValue() + ")");
+    }
+    
+    @Override
+    public void visit(Identifier node) {
+        System.out.print(node.getName());
+    }
+    
+    @Override
+    public void visit(TypeNode typeNode) {
+        // For printing purposes, you can print the type's string representation
+        if (typeNode.getType() != null) {
+            builder.append(typeNode.getType().toString());
+        } else {
+            builder.append("nullType");
+        }
     }
 
     // Add remaining stubs to satisfy the interface

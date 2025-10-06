@@ -55,4 +55,6 @@ public interface NodeVisitor {
     // computation
     public void visit (DeclarationList node);
     public void visit (Computation node);
+    public void visit (Identifier node);
+    public void visit (TypeNode typeNode);
 }
