@@ -74,6 +74,7 @@ public class Compiler {
     private Token currentToken;
     private int numDataRegisters;
     private List<Integer> instructions;
+    private ast.AST astRoot;
 
     public Compiler(Scanner scanner, int numRegs) {
         this.scanner = scanner;
@@ -86,14 +87,20 @@ public class Compiler {
         initSymbolTable();
         try {
             Computation root = computation();
+            this.astRoot = new AST(root); 
             return new AST(root);
         } catch (QuitParseException q) {
-            return new ast.AST(null);
+        	this.astRoot = new AST(null);
+            return this.astRoot;
         }
     }
     
     public void interpret(InputStream in) {
-        System.out.println("Interpreter not implemented for this assignment.");
+    	if (astRoot == null || astRoot.getRoot() == null) {
+            System.out.println("Interpreter: no program to run.");
+            return;
+        }
+        new MiniInterpreter(in, System.out).run(astRoot.getRoot());
     }
 
     public int[] compile() {
@@ -775,5 +782,395 @@ public class Compiler {
         }
         expect(Token.Kind.CLOSE_PAREN);
         return new FunctionCall(identToken.lineNumber(), identToken.charPosition(), id, args);
+    }
+    
+ // ---------- Minimal interpreter for the I/O test ----------
+    	private static final class MiniInterpreter implements ast.NodeVisitor {
+        private final java.util.Scanner sc;
+        private final java.io.PrintStream out;
+        private final java.util.Map<String,Object> env = new java.util.HashMap<>();
+        private final java.util.Map<String, AST.FunctionDeclaration> funcs = new java.util.HashMap<>();
+        private Object eval; // holds last evaluated expression result
+
+        MiniInterpreter(InputStream in, java.io.PrintStream out) {
+            this.sc = new java.util.Scanner(in);
+            this.out = out;
+        }
+
+        void run(ast.Computation prog) {
+            // 1) Index function declarations (handy for user-defined calls later)
+            for (AST.Declaration d : prog.functions()) {
+                if (d instanceof AST.FunctionDeclaration fd) {
+                    funcs.put(fd.getIdentifier().getName(), fd);
+                }
+            }
+
+            // 2) Allocate/initialize globals with sensible defaults
+            for (AST.Declaration d : prog.variables()) {
+                if (d instanceof AST.VariableDeclaration vd) {
+                    AST.TypeNode tn = (AST.TypeNode) vd.getTypeNode();
+                    types.Type t = tn.getActualType();
+                    Object def = defaultValueForType(t);
+                    env.put(vd.getIdentifier().getName(), def);
+                }
+            }
+
+            // 3) Execute main body
+            prog.mainStatementSequence().accept(this);
+        }
+
+        /** Default value for a type (ints 0, floats 0.0f, bool false, arrays allocated and filled). */
+        private Object defaultValueForType(types.Type t) {
+            if (t instanceof types.IntType)   return Integer.valueOf(0);
+            if (t instanceof types.FloatType) return Float.valueOf(0.0f); // use Float, not Double
+            if (t instanceof types.BoolType)  return Boolean.FALSE;
+            if (t instanceof types.ArrayType) return allocArray((types.ArrayType) t);
+            return null; // for void or unknown, nothing to store
+        }
+
+        /** Recursively allocates Java arrays for Mocha array types (only when extent >= 0). */
+        private Object allocArray(types.ArrayType at) {
+            int n = at.getExtent();
+            if (n < 0) return null; // unspecified size: don’t allocate
+            Object[] arr = new Object[n];
+            for (int i = 0; i < n; i++) {
+                arr[i] = defaultValueForType(at.getBase());
+            }
+            return arr;
+        }
+        
+        private static final class ReturnSignal extends RuntimeException {
+            final Object value;
+            ReturnSignal(Object v) { this.value = v; }
+        }
+        
+        private boolean asBool(Object v) {
+            if (v instanceof Boolean) return (Boolean) v;
+            throw new RuntimeException("Condition is not boolean: " + v);
+        }
+        
+        @Override
+        public void visit(AST.ReturnStatement node) {
+            if (node.getValue() != null) {
+                node.getValue().accept(this);
+                throw new ReturnSignal(eval);
+            } else {
+                throw new ReturnSignal(null);
+            }
+        }
+        
+        private static boolean isInt(Object o)    { return o instanceof Integer; }
+        private static boolean isFloaty(Object o) { return o instanceof Float || o instanceof Double; }
+        private static double  toDouble(Object o) {
+            if (o instanceof Integer) return ((Integer)o).doubleValue();
+            if (o instanceof Float)   return ((Float)o).doubleValue();
+            if (o instanceof Double)  return (Double)o;
+            throw new RuntimeException("N/A");
+        }
+        
+        @Override
+        public void visit(AST.IntegerLiteral n) { eval = Integer.valueOf(n.getValue()); }
+
+        @Override
+        public void visit(AST.FloatLiteral n)   { eval = Float.valueOf(n.getValue()); }
+
+        @Override
+        public void visit(AST.UnaryMinus n) {
+            n.getExpr().accept(this);
+            Object v = eval;
+            if (isInt(v))        eval = -((Integer) v);
+            else if (isFloaty(v)) eval = Float.valueOf((float)(-toDouble(v)));
+            else throw new RuntimeException("Unary minus on non-numeric: " + v);
+        }
+
+        @Override
+        public void visit(AST.Addition n) {
+            n.getLeft().accept(this);  Object L = eval;
+            n.getRight().accept(this); Object R = eval;
+            if (isInt(L) && isInt(R)) eval = (Integer)L + (Integer)R;
+            else eval = Float.valueOf((float)(toDouble(L) + toDouble(R)));
+        }
+
+        @Override
+        public void visit(AST.Subtraction n) {
+            n.getLeft().accept(this);  Object L = eval;
+            n.getRight().accept(this); Object R = eval;
+            if (isInt(L) && isInt(R)) eval = (Integer)L - (Integer)R;
+            else eval = Float.valueOf((float)(toDouble(L) - toDouble(R)));
+        }
+
+        @Override
+        public void visit(AST.Multiplication n) {
+            n.getLeft().accept(this);  Object L = eval;
+            n.getRight().accept(this); Object R = eval;
+            if (isInt(L) && isInt(R)) eval = (Integer)L * (Integer)R;
+            else eval = Float.valueOf((float)(toDouble(L) * toDouble(R)));
+        }
+
+        @Override
+        public void visit(AST.Division n) {
+            n.getLeft().accept(this);  Object L = eval;
+            n.getRight().accept(this); Object R = eval;
+            eval = Float.valueOf((float)(toDouble(L) / toDouble(R))); // numeric division
+        }
+
+        @Override
+        public void visit(AST.Modulo n) {
+            n.getLeft().accept(this);  Object L = eval;
+            n.getRight().accept(this); Object R = eval;
+            if (isInt(L) && isInt(R)) eval = (Integer)L % (Integer)R;
+            else throw new RuntimeException("Modulo requires int operands at runtime");
+        }
+        
+        @Override
+        public void visit(AST.LogicalNot n) {
+            n.getExpression().accept(this);
+            eval = Boolean.valueOf(!asBool(eval));
+        }
+
+        @Override
+        public void visit(AST.LogicalAnd n) {
+            n.getLeft().accept(this);
+            boolean lb = asBool(eval);
+            if (!lb) { eval = Boolean.FALSE; return; } // short-circuit
+            n.getRight().accept(this);
+            eval = Boolean.valueOf(asBool(eval));
+        }
+
+        @Override
+        public void visit(AST.LogicalOr n) {
+            n.getLeft().accept(this);
+            boolean lb = asBool(eval);
+            if (lb) { eval = Boolean.TRUE; return; } // short-circuit
+            n.getRight().accept(this);
+            eval = Boolean.valueOf(asBool(eval));
+        }
+
+        @Override
+        public void visit(AST.Relation n) {
+            n.getLeft().accept(this);  Object L = eval;
+            n.getRight().accept(this); Object R = eval;
+
+            // Adjust the getter to match your AST: getOp() / getOperator() / getRelop()
+            String op = n.getOperator();
+
+            boolean res;
+            if (L instanceof Number && R instanceof Number) {
+                double a = toDouble(L), b = toDouble(R);
+                switch (op) {
+                    case "==": res = (a == b); break;
+                    case "!=": res = (a != b); break;
+                    case "<":  res = (a <  b); break;
+                    case "<=": res = (a <= b); break;
+                    case ">":  res = (a >  b); break;
+                    case ">=": res = (a >= b); break;
+                    default: throw new RuntimeException("Unknown relop: " + op);
+                }
+            } else if (L instanceof Boolean && R instanceof Boolean) {
+                boolean a = (Boolean)L, b = (Boolean)R;
+                switch (op) {
+                    case "==": res = (a == b); break;
+                    case "!=": res = (a != b); break;
+                    default: throw new RuntimeException("Bool relop not supported: " + op);
+                }
+            } else {
+                throw new RuntimeException("Relation operands must be both numeric or both bool");
+            }
+            eval = Boolean.valueOf(res);
+        }
+
+        // ---------- statements ----------
+        @Override
+        public void visit(AST.StatementSequence node) {
+            for (ast.Statement s : node) if (s != null) s.accept(this);
+        }
+        
+        @Override
+        public void visit(AST.VariableDeclaration n) {
+            types.Type t = ((AST.TypeNode) n.getTypeNode()).getActualType();
+            env.put(n.getIdentifier().getName(), defaultValueForType(t));
+        }
+
+//        @Override
+//        public void visit(AST.Assignment node) {
+//            node.getSource().accept(this);
+//            Object rhs = eval;
+//            // only simple identifiers needed for the first test
+//            if (node.getDestination() instanceof AST.Identifier id) {
+//                env.put(id.getName(), rhs);
+//            } else {
+//                throw new RuntimeException("Only simple assignments supported in MiniInterpreter.");
+//            }
+//            eval = null;
+//        }
+
+        @Override
+        public void visit(AST.FunctionCall n) {
+            // 1) Evaluate argument expressions to values
+            java.util.List<Object> argVals = new java.util.ArrayList<>();
+            for (ast.Expression e : n.getArguments().getArguments()) {
+                e.accept(this);
+                argVals.add(eval);
+            }
+
+            String name = n.getIdentifier().getName();
+
+            // 2) Built-ins (no default that throws!)
+            if ("printInt".equals(name)) {
+                int i = (argVals.get(0) instanceof Number) ? ((Number)argVals.get(0)).intValue() : 0;
+                out.print(i + " ");
+                eval = null; 
+                return;
+            } else if ("printFloat".equals(name)) {
+                double d = (argVals.get(0) instanceof Number) ? ((Number)argVals.get(0)).doubleValue() : 0.0;
+                out.printf("%.2f ", d);
+                eval = null; 
+                return;
+            } else if ("printBool".equals(name)) {
+                boolean b = (argVals.get(0) instanceof Boolean) ? ((Boolean)argVals.get(0)) : false;
+                out.print(b ? "true " : "false ");
+                eval = null; 
+                return;
+            } else if ("println".equals(name)) {
+                out.println();
+                eval = null; 
+                return;
+            } else if ("readInt".equals(name)) {
+                out.print("int? ");
+                eval = Integer.valueOf(sc.nextInt());
+                return;
+            } else if ("readFloat".equals(name)) {
+                out.print("float? ");
+                eval = Double.valueOf(sc.nextDouble());
+                return;
+            } else if ("readBool".equals(name)) {
+                out.print("true or false? ");
+                String tok = sc.next();
+                eval = Boolean.valueOf("true".equalsIgnoreCase(tok.trim()));
+                return;
+            }
+
+            // 3) User-defined function
+            AST.FunctionDeclaration fd = funcs.get(name);
+            if (fd == null) throw new RuntimeException("N/A");
+
+            // Save current env (simple single-frame model)
+            java.util.Map<String,Object> saved = new java.util.HashMap<>(env);
+            try {
+                // Bind parameters (values, not AST nodes!)
+                java.util.List<AST.FormalParameter> ps = fd.getParameters();
+                for (int i = 0; i < ps.size(); i++) {
+                    env.put(ps.get(i).getIdentifier().getName(), argVals.get(i));
+                }
+
+                // Allocate locals with defaults
+                for (AST.Declaration d : fd.getBody().getDeclarations()) {
+                    if (d instanceof AST.VariableDeclaration vd) {
+                        types.Type t = ((AST.TypeNode)vd.getTypeNode()).getActualType();
+                        env.put(vd.getIdentifier().getName(), defaultValueForType(t));
+                    }
+                }
+
+                // Execute body and catch return
+                try {
+                    fd.getBody().getStatements().accept(this);
+                    eval = null; // no explicit return => void
+                } catch (ReturnSignal r) {
+                    eval = r.value;
+                }
+            } finally {
+                env.clear();
+                env.putAll(saved);
+            }
+        }
+        
+        @Override
+        public void visit(AST.IfStatement n) {
+            n.getCondition().accept(this);
+            if (asBool(eval)) {
+                n.getThenBlock().accept(this);
+            } else if (n.getElseBlock() != null) {
+                n.getElseBlock().accept(this);
+            }
+            eval = null;
+        }
+
+        @Override
+        public void visit(AST.WhileStatement n) {
+            for (;;) {
+                n.getCondition().accept(this);
+                if (!asBool(eval)) break;
+                n.getBody().accept(this);
+            }
+            eval = null;
+        }
+
+        @Override
+        public void visit(AST.RepeatStatement n) {
+            do {
+                n.getBody().accept(this);
+                n.getCondition().accept(this);
+            } while (!asBool(eval));
+            eval = null;
+        }
+
+        @Override
+        public void visit(AST.ArgumentList node) {
+            // Evaluate args left-to-right; keep last in eval for convenience
+            for (ast.Expression e : node.getArguments()) e.accept(this);
+        }
+        
+        @Override
+        public void visit(AST.Assignment node) {
+            // evaluate RHS normally
+            node.getSource().accept(this);
+            Object rhs = eval;
+
+            ast.Expression dest = node.getDestination();
+            if (dest instanceof AST.Identifier id) {
+                env.put(id.getName(), rhs);
+            } else if (dest instanceof AST.ArrayIndex ai) {
+                // evaluate base and index explicitly (we need the container)
+                Object base = valueOf(ai.getBase());
+                if (!(base instanceof Object[] arr)) {
+                    throw new RuntimeException("Assigning into non-array");
+                }
+                int idx = ((Number) valueOf(ai.getIndex())).intValue();
+                if (idx < 0 || idx >= arr.length) {
+                    throw new RuntimeException("Index out of bounds: " + idx);
+                }
+                arr[idx] = rhs;
+            } else {
+                throw new RuntimeException("Unsupported lvalue: " + dest.getClass().getSimpleName());
+            }
+            eval = null;
+        }
+
+        // ---------- expressions ----------
+        @Override public void visit(AST.BoolLiteral node)   { eval = Boolean.valueOf(node.getValue()); }
+
+        @Override
+        public void visit(AST.Identifier node) {
+            Object v = env.get(node.getName());
+            if (v == null) throw new RuntimeException("Uninitialized var: " + node.getName());
+            eval = v;
+        }
+
+        // The rest of NodeVisitor methods (not used in the I/O test) can be no-ops:
+        @Override public void visit(ast.Computation n) {}
+        @Override public void visit(AST.AddressOf n)   { throw new RuntimeException("N/A"); }
+        @Override public void visit(AST.ArrayIndex n)  { throw new RuntimeException("N/A"); }
+        @Override public void visit(AST.Dereference n) { throw new RuntimeException("N/A"); }
+        @Override public void visit(AST.Power n)       { throw new RuntimeException("N/A"); }
+        @Override public void visit(AST.FunctionBody n){ throw new RuntimeException("N/A"); }
+        @Override public void visit(AST.FunctionDeclaration n){ throw new RuntimeException("N/A"); }
+        @Override public void visit(AST.DeclarationList n){ /* globals handled in run() */ }
+        @Override public void visit(AST.TypeNode n) {}
+
+        // helper to evaluate an expression node to a Java value
+        private Object valueOf(ast.Expression e) {
+            e.accept(this);
+            return eval;
+        }
     }
 }
