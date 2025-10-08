@@ -121,6 +121,16 @@ public class TypeChecker implements NodeVisitor {
         }
         node.setType(resultType);
     }
+    
+    private String fmtArgs(java.util.List<Type> types) {
+        StringBuilder sb = new StringBuilder("(");
+        for (int i = 0; i < types.size(); i++) {
+            if (i > 0) sb.append(", ");
+            sb.append(shortName(types.get(i))); // prints int/float/bool
+        }
+        sb.append(")");
+        return sb.toString();
+    }
 
     @Override
     public void visit(Computation node) {
@@ -129,8 +139,9 @@ public class TypeChecker implements NodeVisitor {
 
         // (1) Predeclare all functions with both mangled and base names
         for (Declaration d : node.functions()) {
-            if (d instanceof AST.FunctionDeclaration fd) {
+            if (d instanceof AST.FunctionDeclaration) {
 
+            	AST.FunctionDeclaration fd = (AST.FunctionDeclaration) d;
                 // Build the parameter typelist and ensure TypeNodes are set
                 TypeList tl = new TypeList();
                 for (AST.FormalParameter p : fd.getParameters()) {
@@ -224,9 +235,12 @@ public class TypeChecker implements NodeVisitor {
         if (baseType == null)  baseType  = new ErrorType("Unresolved array base.");
         if (indexType == null) indexType = new ErrorType("Unresolved array index.");
         
-        if (baseType instanceof ArrayType arr
+        if (baseType instanceof ArrayType
                 && indexType instanceof IntType
-                && node.getIndex() instanceof AST.IntegerLiteral lit) {
+                && node.getIndex() instanceof AST.IntegerLiteral) {
+        	
+        		ArrayType arr = (ArrayType) baseType;
+        		AST.IntegerLiteral lit = (AST.IntegerLiteral) node.getIndex();
 
                 int extent = arr.getExtent();    // only meaningful when >= 0
                 int idx    = lit.getValue();
@@ -273,18 +287,27 @@ public class TypeChecker implements NodeVisitor {
 
     @Override
     public void visit(Power node) {
-        // Power has special rules, handle it separately
         node.getBase().accept(this);
         node.getExponent().accept(this);
-        Type baseType = node.getBase().getType();
-        Type expType = node.getExponent().getType();
 
-        if ((baseType.equivalent(new IntType()) || baseType.equivalent(new FloatType())) &&
-            (expType.equivalent(new IntType()) || expType.equivalent(new FloatType()))) {
-            node.setType(new FloatType()); // Result of power is usually float
-        } else {
-            reportError(node.lineNumber(), node.charPosition(), "Power operator requires numeric base and exponent.");
+        Type baseType = node.getBase().getType();
+        Type expType  = node.getExponent().getType();
+
+        boolean baseNumeric = (baseType instanceof IntType) || (baseType instanceof FloatType);
+        boolean expNumeric  = (expType  instanceof IntType) || (expType  instanceof FloatType);
+
+        if (!baseNumeric || !expNumeric) {
+            reportError(node.lineNumber(), node.charPosition(),
+                "Power operator requires numeric base and exponent.");
             node.setType(new ErrorType("Invalid types for power op."));
+            return;
+        }
+
+        // int ^ int -> int, else -> float
+        if (baseType instanceof IntType && expType instanceof IntType) {
+            node.setType(new IntType());
+        } else {
+            node.setType(new FloatType());
         }
     }
 
@@ -358,7 +381,7 @@ public class TypeChecker implements NodeVisitor {
         Type condType = node.getCondition().getType();
 
         if (!(condType instanceof BoolType)) {
-            reportError(node.lineNumber(), node.charPosition(), "IfStat requires a boolean condition, not " + condType + ".");
+            reportError(node.lineNumber(), node.charPosition(), "IfStat requires bool condition not " + condType + ".");
         }
 
         table.enterScope();
@@ -379,7 +402,7 @@ public class TypeChecker implements NodeVisitor {
         Type condType = node.getCondition().getType();
 
         if (!(condType instanceof BoolType)) {
-            reportError(node.lineNumber(), node.charPosition(), "WhileStat requires a bool condition not " + shortName(condType) + ".");
+            reportError(node.lineNumber(), node.charPosition(), "WhileStat requires bool condition not " + shortName(condType) + ".");
         }
 
         table.enterScope();
@@ -398,15 +421,18 @@ public class TypeChecker implements NodeVisitor {
         Type condType = node.getCondition().getType();
 
         if (!(condType instanceof BoolType)) {
-            reportError(node.lineNumber(), node.charPosition(), "RepeatStat requires a bool condition not " + shortName(condType) + ".");
+            reportError(node.lineNumber(), node.charPosition(), "RepeatStat requires bool condition not " + shortName(condType) + ".");
         }
         node.setType(new VoidType());
     }
 
     @Override
     public void visit(ReturnStatement node) {
-        if (currentFunction == null) {
-            reportError(node.lineNumber(), node.charPosition(), "Return statement is not inside a function.");
+    	if (currentFunction == null) {
+            if (node.getValue() != null) {
+                reportError(node.lineNumber(), node.charPosition(),
+                    "Main cannot return a value.");
+            }
             node.setType(new VoidType());
             return;
         }
@@ -472,7 +498,9 @@ public class TypeChecker implements NodeVisitor {
         }
 
         if (resultType instanceof ErrorType) {
-            reportError(node.lineNumber(), node.charPosition(), ((ErrorType) resultType).getMessage());
+        	String argsStr = fmtArgs(argList);
+            reportError(node.lineNumber(), node.charPosition(),
+                "Call with args " + argsStr + " matches no function signature.");
         }
         node.setType(resultType);
         node.getIdentifier().setSymbol(funcSymbol);

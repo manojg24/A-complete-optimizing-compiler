@@ -675,6 +675,11 @@ public class Compiler {
     	if (have(Token.Kind.CALL)) {
             return funcCall();
         }
+    	if (have(Token.Kind.NOT)) {
+            Token op = expectRetrieve(Token.Kind.NOT);
+            Expression e = factor(); // right-associative unary
+            return new LogicalNot(op.lineNumber(), op.charPosition(), e);
+        }
     	if (have(Token.Kind.SUB)) {  // handle unary minus
             Token op = expectRetrieve(Token.Kind.SUB);
             Expression right = factor(); // recursive call for unary
@@ -800,14 +805,16 @@ public class Compiler {
         void run(ast.Computation prog) {
             // 1) Index function declarations (handy for user-defined calls later)
             for (AST.Declaration d : prog.functions()) {
-                if (d instanceof AST.FunctionDeclaration fd) {
+                if (d instanceof AST.FunctionDeclaration) {
+                	AST.FunctionDeclaration fd = (AST.FunctionDeclaration) d;
                     funcs.put(fd.getIdentifier().getName(), fd);
                 }
             }
 
             // 2) Allocate/initialize globals with sensible defaults
             for (AST.Declaration d : prog.variables()) {
-                if (d instanceof AST.VariableDeclaration vd) {
+                if (d instanceof AST.VariableDeclaration) {
+                	AST.VariableDeclaration vd = (AST.VariableDeclaration) d;
                     AST.TypeNode tn = (AST.TypeNode) vd.getTypeNode();
                     types.Type t = tn.getActualType();
                     Object def = defaultValueForType(t);
@@ -945,6 +952,44 @@ public class Compiler {
             n.getRight().accept(this);
             eval = Boolean.valueOf(asBool(eval));
         }
+        
+        @Override
+        public void visit(AST.Power n) {
+            n.getBase().accept(this);
+            Object L = eval;
+            n.getExponent().accept(this);
+            Object R = eval;
+
+            if (isInt(L) && isInt(R)) {
+                int b = (Integer) L;
+                int e = (Integer) R;
+                if (e < 0) {
+                    // negative int exponent -> float result
+                    eval = Float.valueOf((float)Math.pow(b, e));
+                } else {
+                    eval = Integer.valueOf(intPow(b, e));
+                }
+                return;
+            }
+
+            // any float involved -> float result
+            double bd = toDouble(L);
+            double ed = toDouble(R);
+            eval = Float.valueOf((float)Math.pow(bd, ed));
+        }
+
+        // fast integer power (non-negative exponent)
+        private int intPow(int base, int exp) {
+            int result = 1;
+            int b = base;
+            int e = exp;
+            while (e > 0) {
+                if ((e & 1) == 1) result *= b;
+                b *= b;
+                e >>= 1;
+            }
+            return result;
+        }
 
         @Override
         public void visit(AST.Relation n) {
@@ -1065,7 +1110,8 @@ public class Compiler {
 
                 // Allocate locals with defaults
                 for (AST.Declaration d : fd.getBody().getDeclarations()) {
-                    if (d instanceof AST.VariableDeclaration vd) {
+                    if (d instanceof AST.VariableDeclaration) {
+                    	AST.VariableDeclaration vd = (AST.VariableDeclaration) d;
                         types.Type t = ((AST.TypeNode)vd.getTypeNode()).getActualType();
                         env.put(vd.getIdentifier().getName(), defaultValueForType(t));
                     }
@@ -1127,19 +1173,30 @@ public class Compiler {
             Object rhs = eval;
 
             ast.Expression dest = node.getDestination();
-            if (dest instanceof AST.Identifier id) {
+            if (dest instanceof AST.Identifier) {
+            	AST.Identifier id = (AST.Identifier) dest;
                 env.put(id.getName(), rhs);
-            } else if (dest instanceof AST.ArrayIndex ai) {
+            } else if (dest instanceof AST.ArrayIndex ) {
+            	AST.ArrayIndex ai = (AST.ArrayIndex) dest;
                 // evaluate base and index explicitly (we need the container)
-                Object base = valueOf(ai.getBase());
-                if (!(base instanceof Object[] arr)) {
-                    throw new RuntimeException("Assigning into non-array");
-                }
-                int idx = ((Number) valueOf(ai.getIndex())).intValue();
-                if (idx < 0 || idx >= arr.length) {
-                    throw new RuntimeException("Index out of bounds: " + idx);
-                }
-                arr[idx] = rhs;
+            	Object base = valueOf(ai.getBase());
+            	if (!(base instanceof Object[])) {
+            	    throw new RuntimeException("Assigning into non-array");
+            	}
+            	Object[] arr = (Object[]) base;
+
+            	// evaluate index once and validate it's numeric
+            	Object idxObj = valueOf(ai.getIndex());
+            	if (!(idxObj instanceof Number)) {
+            	    throw new RuntimeException("Array index is not an int");
+            	}
+            	int idx = ((Number) idxObj).intValue();
+
+            	if (idx < 0 || idx >= arr.length) {
+            	    throw new RuntimeException("Index out of bounds: " + idx);
+            	}
+
+            	arr[idx] = rhs;
             } else {
                 throw new RuntimeException("Unsupported lvalue: " + dest.getClass().getSimpleName());
             }
@@ -1161,7 +1218,6 @@ public class Compiler {
         @Override public void visit(AST.AddressOf n)   { throw new RuntimeException("N/A"); }
         @Override public void visit(AST.ArrayIndex n)  { throw new RuntimeException("N/A"); }
         @Override public void visit(AST.Dereference n) { throw new RuntimeException("N/A"); }
-        @Override public void visit(AST.Power n)       { throw new RuntimeException("N/A"); }
         @Override public void visit(AST.FunctionBody n){ throw new RuntimeException("N/A"); }
         @Override public void visit(AST.FunctionDeclaration n){ throw new RuntimeException("N/A"); }
         @Override public void visit(AST.DeclarationList n){ /* globals handled in run() */ }
