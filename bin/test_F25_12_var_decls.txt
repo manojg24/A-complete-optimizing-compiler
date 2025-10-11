@@ -1,0 +1,20 @@
+// author: Macsen Casaus
+// This tests declaring variables of different types and multiple
+// variables per type
+
+main
+
+int easyInt;
+float easyFloat;
+
+bool[10] easyArray;
+
+int a, b, c;
+float x, y, z;
+
+int[434] aa, bb, cc;
+float[2025] xx, yy, zz;
+
+{
+    return 0;
+}.

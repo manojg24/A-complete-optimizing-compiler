@@ -1,0 +1,11 @@
+// handling of block comment test 
+
+/* abcd */ // this is fine
+
+/* 
+*
+a
+*/ // so is this
+
+
+/* abcd // this is problematic because missing the end of block comment

@@ -1,0 +1,13 @@
+// Joshua Lass
+// testing functionality of modulo operator
+
+main
+int a, b, c;
+{
+    a = 5;
+    b = 10;
+    c = 20;
+    call printInt(a % 3); call println();
+    call printInt(b % 3); call println();
+    call printInt(c % 3); call println();
+}.

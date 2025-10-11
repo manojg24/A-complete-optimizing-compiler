@@ -1,0 +1,21 @@
+// Alex Beamer
+// Tests that well-formed functions are properly handled.
+// This should succeed.
+
+main
+
+int[5] a;
+
+function customFunc(int[] arr): void {
+    arr[0] = -5;
+};
+
+function f2 (int b) : int {
+    return b;
+};
+
+{
+    call customFunc (a);
+    call printInt(a[0]);
+    call printInt(call f2(a[0]));
+}.

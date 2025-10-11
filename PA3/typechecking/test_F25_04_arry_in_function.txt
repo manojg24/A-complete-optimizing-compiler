@@ -1,0 +1,15 @@
+// Renjie Li
+// check in-function index-out-of-bound
+
+main
+
+int[4] arr;
+
+function foo(int[] a) : int {
+  return a[5];
+};
+
+
+{
+  call foo(arr);
+}.

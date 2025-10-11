@@ -1,0 +1,26 @@
+// Siqi Guo
+// Tests function return as input to another function with type mismatches
+
+main
+
+function getInt() : int {
+    return 7;
+};
+
+function getFloat() : float {
+    return 3.14;
+};
+
+function getBool() : bool {
+    return true;
+};
+
+{
+    // Function return as input to another function with type mismatches
+    call printInt(call getFloat());
+    call printFloat(call getInt());
+    call printBool(call getInt());
+    call printBool(call getFloat());
+    
+    call println();
+}.

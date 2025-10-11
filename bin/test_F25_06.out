@@ -1,0 +1,14 @@
+DO
+IDENT	dothis
+MAIN
+IDENT	mainfunction
+IDENT	testfunction
+REPEAT
+RETURN
+AND
+OR
+NOT
+OD
+CALL
+FI
+EOF

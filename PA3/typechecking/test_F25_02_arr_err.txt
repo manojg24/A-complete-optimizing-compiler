@@ -1,0 +1,27 @@
+// should prevent dimension of array <=0
+main
+
+int i;
+
+int[5][6] arr1;
+int[10] arr2;
+int[-5][6] arr3; // language allows it but you should prevent this
+int[0] arr4; // ditto
+
+{
+    i = 0;
+    arr2[i] = 10;
+
+    arr1[i][i+1] = 20;
+    
+    arr1[0][2] = 30;
+
+    arr1[0][0] = 0;
+    arr2[arr1[i][0]] = 1;
+
+    arr1[-4][1] = 0; // should prevent this as index is known at compile-time
+
+    arr2[arr1[0][2]] = 0; // there will be a runtime error because of this out-of-bound access, but we cannot prevent
+    arr2[10] = arr1[i][i+1]; // we could prevent this out-of-bound on arr2 as index is known statically
+    
+}.

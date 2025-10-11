@@ -1,0 +1,14 @@
+// Avery Johnson
+// Tests correctness of nested if/while loop scanning
+
+int a = 100;
+int b = 0;
+while (a > b){
+    if (b % 2 == 0){
+        b++;
+    }
+    else {
+        b++;
+        a--
+    }
+}

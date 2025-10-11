@@ -1,0 +1,16 @@
+// Andy Chiu
+// Test function overloading with same params but different return types
+
+main
+
+function foo(int x) : int {
+    return x;
+};
+
+function foo(int x) : float {    // Same signature, different return
+    return 3.14;
+};
+
+{
+    call printInt(call foo(5));
+}.

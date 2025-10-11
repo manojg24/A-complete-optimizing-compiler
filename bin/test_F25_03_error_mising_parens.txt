@@ -1,0 +1,10 @@
+// Author: Gavin Ratcliff
+// Should throw SyntaxError because the while condition is not wrapped in parenthesis.
+// Ex
+
+main
+{
+    while 3 >= 2 do
+        call printFloat(4.34);
+    od;
+}.

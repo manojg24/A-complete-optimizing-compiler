@@ -1,0 +1,36 @@
+// Mason Roberson
+// Arithmetic, prints, and if else statements
+
+main
+
+int a;
+int b;
+int c;
+bool f;
+
+{
+    a = call readInt();
+    b = call readInt();
+    c = call readInt();
+    f = call readBool();
+
+    call printInt(a + b * c); 
+
+    if ( ((a - b) * (c - a)) > 0 ) then
+        call printBool(true);
+
+    else
+        call printBool(false);   
+
+    fi;
+
+    if (f) then
+        call printInt(a - b);
+
+    else
+        call printInt(b - a);
+
+    fi;
+
+    call println();                 
+}.

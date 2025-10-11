@@ -1,0 +1,30 @@
+// Joshua Lass
+// test to make sure that there is an error on functions that do not return for some branches.
+
+main
+
+int a;
+
+//this is not always returning
+function foo(int a, bool b) : int {
+  a += 1;
+  if ( b ) then
+    return a;
+  else
+    a += 1;
+  fi;
+};
+
+//this is always returning
+function bar(int a, bool b) : int {
+  a += 1;
+  if ( b ) then
+    return a;
+  else
+    return a + 2;
+  fi;
+};
+
+{
+    a ++;
+}.

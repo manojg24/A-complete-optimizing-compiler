@@ -1,0 +1,7 @@
+//author: Gavin Ratcliff
+//purpose: tests (until now) untested keywords and their partials (which should be identifiers)
+
+int then = 5;  
+int until = 3;
+int call = 7;
+callme cal unt unti untildonethen

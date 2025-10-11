@@ -1,0 +1,51 @@
+// Alex Beamer
+// Tests functions with variable declarations
+
+main
+
+int[5] arr;
+int i;
+int count;
+
+// parameter arr shadows outer
+function max(int[] arr, int n) : int {
+    int max;
+    max = arr[0];
+    i = 0;
+    repeat
+        i++;
+        if ( arr[i] > max ) then
+            max = arr[i];
+        fi;
+    until (i == n);
+    return max;
+};
+
+function specialPrint(int n) : void {
+    int step;
+    int[2] buf;
+    int temp;
+    // variable count shadows outer
+    int i;
+    step = 0;
+    buf[0] = 0;
+    repeat
+        i = 0;
+        while (i < count) do
+            buf[1] = arr[i] - step;
+            temp = call max (buf, 2);
+            call printInt(temp);
+        od;
+        step++;
+    until (step == n);
+};
+
+{
+    count = 5;
+    i = 0;
+    while (i < count) do
+        arr[i] = call readInt();
+        i += 1;
+    od;
+    call specialPrint( call max( arr, count ) );
+}.

@@ -1,0 +1,10 @@
+//Author: Hannah Lucas
+//Identifying symbol redeclaration
+
+main
+
+int a;
+int a;
+{
+    call printInt(5);
+}.

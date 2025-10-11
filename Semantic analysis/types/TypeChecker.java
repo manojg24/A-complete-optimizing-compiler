@@ -88,12 +88,8 @@ public class TypeChecker implements NodeVisitor {
 
         Type leftType = left.getType();
         Type rightType = right.getType();
-        
-        if (leftType instanceof ErrorType || rightType instanceof ErrorType) {
-            node.setType(new ErrorType("Propagated type error."));
-            return;
-        }
 
+        // Do NOT short-circuit on ErrorType. Let the type ops produce nested messages.
         if (leftType == null)  leftType  = new ErrorType("Unresolved left operand.");
         if (rightType == null) rightType = new ErrorType("Unresolved right operand.");
 
@@ -223,7 +219,7 @@ public class TypeChecker implements NodeVisitor {
     }
 
     @Override
-    public void visit(ArrayIndex node) {
+    public void visit(AST.ArrayIndex node) {
         // Type-check children first
         node.getBase().accept(this);
         node.getIndex().accept(this);
@@ -231,32 +227,43 @@ public class TypeChecker implements NodeVisitor {
         Type baseType  = node.getBase().getType();
         Type indexType = node.getIndex().getType();
 
-        // Prevent nulls from reaching Type#index(...)
         if (baseType == null)  baseType  = new ErrorType("Unresolved array base.");
         if (indexType == null) indexType = new ErrorType("Unresolved array index.");
-        
-        if (baseType instanceof ArrayType
-                && indexType instanceof IntType
-                && node.getIndex() instanceof AST.IntegerLiteral) {
-        	
-        		ArrayType arr = (ArrayType) baseType;
-        		AST.IntegerLiteral lit = (AST.IntegerLiteral) node.getIndex();
 
-                int extent = arr.getExtent();    // only meaningful when >= 0
-                int idx    = lit.getValue();
-                if (extent >= 0 && (idx < 0 || idx >= extent)) {
-                	String arrName = extractRootIdent(node.getBase());
-                	String msg = "Array Index Out of Bounds : " + idx +
-                	             " for array " + (arrName != null ? arrName : "array");
-                    // point exactly at the index literal
-                    reportError(lit.lineNumber(), lit.charPosition(), msg);
-                    node.setType(new ErrorType(msg));
-                    return; // stop here; we've produced the specific error already
-                }
+        // ---- If base is NOT an array, craft the message the old tests expect ----
+        if (!(baseType instanceof ArrayType)) {
+            // Print AddressOf(<type>) when the base is a simple identifier (lvalue-like)
+            boolean looksLikeLValue = (node.getBase() instanceof AST.Identifier)
+                                   || (node.getBase() instanceof AST.AddressOf);
+            String baseDesc = looksLikeLValue
+                    ? "AddressOf(" + shortName(baseType) + ")"
+                    : shortName(baseType);
+            String idxDesc = shortName(indexType);
+
+            String msg = "Cannot index " + baseDesc + " with " + idxDesc + ".";
+            reportError(node.lineNumber(), node.charPosition(), msg);
+            node.setType(new ErrorType(msg));
+            return;
+        }
+
+        // ---- Optional static bounds check for literal indices (kept as before) ----
+        if (indexType instanceof IntType && node.getIndex() instanceof AST.IntegerLiteral) {
+            ArrayType arr = (ArrayType) baseType;
+            AST.IntegerLiteral lit = (AST.IntegerLiteral) node.getIndex();
+            int extent = arr.getExtent();
+            int idx    = lit.getValue();
+            if (extent >= 0 && (idx < 0 || idx >= extent)) {
+                String msg = "Array Index Out of Bounds : " + idx + " for array " +
+                             (node.getBase() instanceof AST.Identifier
+                              ? ((AST.Identifier)node.getBase()).getName() : "array");
+                reportError(lit.lineNumber(), lit.charPosition(), msg);
+                node.setType(new ErrorType(msg));
+                return;
             }
+        }
 
+        // Normal rule
         Type resultType = baseType.index(indexType);
-
         if (resultType instanceof ErrorType) {
             reportError(node.lineNumber(), node.charPosition(),
                 ((ErrorType) resultType).getMessage());
@@ -428,33 +435,38 @@ public class TypeChecker implements NodeVisitor {
 
     @Override
     public void visit(ReturnStatement node) {
-    	if (currentFunction == null) {
-            if (node.getValue() != null) {
-                reportError(node.lineNumber(), node.charPosition(),
-                    "Main cannot return a value.");
-            }
+        // In main (not inside a function) a bare `return;` is allowed — no error.
+        if (currentFunction == null) {
             node.setType(new VoidType());
             return;
         }
 
-        Type expectedReturnType = ((FuncType) currentFunction.type()).returnType();
+        Type expected = ((FuncType) currentFunction.type()).returnType();
+        String fnName = (currentFunctionName != null) ? currentFunctionName : "<unknown>";
 
-        if (expectedReturnType instanceof VoidType) {
+        if (expected instanceof VoidType) {
             if (node.getValue() != null) {
-                reportError(node.lineNumber(), node.charPosition(), "Function " + currentFunction.name() + " should not return a value.");
+                node.getValue().accept(this);
+                Type actual = node.getValue().getType();
+                // legacy wording you want:
+                reportError(node.lineNumber(), node.charPosition(),
+                    "Function " + fnName + " returns " + actual + " instead of void.");
             }
         } else {
             if (node.getValue() == null) {
-                reportError(node.lineNumber(), node.charPosition(), "Function " + currentFunction.name() + " must return a value of type " + expectedReturnType + ".");
+                reportError(node.lineNumber(), node.charPosition(),
+                    "Function " + fnName + " must return a value of type " + expected + ".");
             } else {
                 node.getValue().accept(this);
-                Type actualReturnType = node.getValue().getType();
-                Type resultType = expectedReturnType.assign(actualReturnType);
-                if (resultType instanceof ErrorType) {
-                    reportError(node.lineNumber(), node.charPosition(), "Function " + currentFunction.name() + " returns " + actualReturnType + " instead of " + expectedReturnType + ".");
+                Type actual = node.getValue().getType();
+                Type ok = expected.assign(actual);
+                if (ok instanceof ErrorType) {
+                    reportError(node.lineNumber(), node.charPosition(),
+                        "Function " + fnName + " returns " + actual + " instead of " + expected + ".");
                 }
             }
         }
+
         node.setType(new VoidType());
     }
 
@@ -469,6 +481,7 @@ public class TypeChecker implements NodeVisitor {
     // FUNCTION-RELATED
     @Override
     public void visit(FunctionCall node) {
+        // 1) type-check args and collect both TypeList + java list
         node.getArguments().accept(this);
         TypeList argTL = (TypeList) node.getArguments().getType();
 
@@ -484,24 +497,31 @@ public class TypeChecker implements NodeVisitor {
         Type resultType;
 
         try {
-            funcSymbol = table.lookup(mangled);              // exact overload
+            // exact overload
+            funcSymbol = table.lookup(mangled);
             resultType = funcSymbol.type().call(argTL);
         } catch (Throwable notFound) {
             try {
-                funcSymbol = table.lookup(base);             // built-ins / non-overloaded fallback
+                // fallback: base name (built-ins / non-overloaded insertions)
+                funcSymbol = table.lookup(base);
                 resultType = funcSymbol.type().call(argTL);
             } catch (Throwable nf2) {
-                reportError(node.lineNumber(), node.charPosition(), "Function " + base + " not found.");
+                reportError(node.lineNumber(), node.charPosition(),
+                    "Function " + base + " not found.");
                 node.setType(new ErrorType("Function not found."));
                 return;
             }
         }
 
         if (resultType instanceof ErrorType) {
-        	String argsStr = fmtArgs(argList);
-            reportError(node.lineNumber(), node.charPosition(),
-                "Call with args " + argsStr + " matches no function signature.");
+            // Force the exact legacy text (no TypeList(...) anywhere)
+            String argsStr = fmtArgs(argList); // e.g. "(float, int)"
+            String msg = "Call with args " + argsStr + " matches no function signature.";
+            reportError(node.lineNumber(), node.charPosition(), msg);
+            node.setType(new ErrorType(msg));  // overwrite the ErrorType so downstream prints our message
+            return;
         }
+
         node.setType(resultType);
         node.getIdentifier().setSymbol(funcSymbol);
     }
@@ -546,7 +566,7 @@ public class TypeChecker implements NodeVisitor {
 
         node.getIdentifier().setSymbol(funcSymbol);
         this.currentFunction = funcSymbol;
-        this.currentFunctionName = base;
+        this.currentFunctionName = node.getIdentifier().getName();
 
         // function scope: declare params by plain names
         table.enterScope();

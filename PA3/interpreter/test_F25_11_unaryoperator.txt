@@ -1,0 +1,34 @@
+//Manoj Gangaraja
+
+main
+
+int i, j;
+float x, y;
+
+function get_five() : int {
+    return call readInt();
+};
+
+{
+    i = 10;
+    j = 2;
+    x = 10.0;
+    y = 2.0;
+
+    // Test compound assignments with two integers
+    i += j;                
+    i -= 3;                 
+    i *= call get_five();   
+
+    // Test compound assignments with two floats
+    x += y;     
+    x -= 3.0;   
+    x /= 2.0;   
+
+    // Output final values
+    call printInt(i);
+    call println();
+
+    call printFloat(x);
+    call println();
+}.

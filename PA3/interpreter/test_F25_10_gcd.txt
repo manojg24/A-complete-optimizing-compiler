@@ -1,0 +1,28 @@
+// Author: Yu Zhong
+// compute gcd(a,b) with while and %; prints gcd
+
+main
+
+int a;
+int b;
+int t;
+
+{
+    a = call readInt();
+    b = call readInt();
+
+    while ( (a != 0) and (b != 0) ) do
+        if (a > b) then
+            a = a % b;
+        else
+            b = b % a;
+        fi;
+    od;
+
+    if (a == 0) then
+        call printInt(b);
+    else
+        call printInt(a);
+    fi;
+    call println();
+}.

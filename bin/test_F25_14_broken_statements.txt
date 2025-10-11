@@ -1,0 +1,15 @@
+// Andy Chiu
+// broken statements
+
+main
+	int x;
+{
+	x += 123 + call abc(3 -4 + -4 - 4.2 - -4.5); // valid statement
+/*
+
+}
+
+*/
+	x = 1; x = 2 // missing ';' in statement. Comment this to test following
+	return call d(x, x + 1, x = 1) // there shouldn't be a statement in arg list
+}

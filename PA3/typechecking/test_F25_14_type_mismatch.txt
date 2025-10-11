@@ -1,0 +1,16 @@
+// Author: Yu Zhong
+// 2 type errors: while needs bool; printFloat expects float
+
+main
+
+int a;
+
+{
+    a = call readInt();
+    while (a) do
+        call println();
+    od;
+
+    // wrong arg type for printFloat
+    call printFloat(a);
+}.

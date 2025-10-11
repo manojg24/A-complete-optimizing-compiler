@@ -1,0 +1,37 @@
+// Author: Macsen Casaus
+// test passing multidimensional arrays to functions and using them
+
+main
+
+int[5] a;
+float[5][5] b;
+bool[5][5][5] c;
+
+function inspectArrays(int[] x, float[][] y, bool[][][] z) : void {
+    int i = 0;
+
+    while (i < 5) do
+        call printInt(x[i]);
+        i++;
+    od;
+
+    i = 0;
+
+    while (i < 5) do
+        call printFloat(y[i][i]);
+        i++;
+    od;
+
+    i = 0;
+
+    while (i < 5) do
+        call printBool(z[i][i][i]);
+        i++;
+    od;
+}
+
+}
+
+{
+    call inspectArrays(a, b, c);
+}.

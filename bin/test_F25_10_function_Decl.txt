@@ -1,0 +1,5 @@
+// Renjie Li
+// Test the function definition
+
+main
+function test_Func ( int x ) : int {return -1;};

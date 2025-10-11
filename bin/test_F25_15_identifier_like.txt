@@ -1,0 +1,7 @@
+// Author: Josh Eury
+// This test verifies that invalid identifiers are rejected.
+
+int _privateMember;
+int[2] 2dVector;
+_privateMember = 0x34;
+2dVector[1] = .6f;

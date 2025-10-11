@@ -1,0 +1,11 @@
+// Author: Josh Eury
+// Test subtraction without spacing on mixed literal types
+
+main
+
+float foo, bar;
+
+{
+    foo = -3.14-159;
+    bar = false-265.358979;
+}.

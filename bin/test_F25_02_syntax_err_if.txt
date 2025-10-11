@@ -1,0 +1,13 @@
+// The 'fi' gramatically belongs to the innner 'if', not outter
+// Should throw SyntaxError
+// same behavior if the 'then' branch of outter 'if' is taken (after printing float 4.34)
+
+main
+{
+    if( 1^2 == 2) then
+        call printFloat(4.34);
+    else if (10 >= 100^1) then
+        call println();
+    fi;
+
+}.

@@ -1,0 +1,7 @@
+// Isaiah Branch
+// Adjacency Test - Test that scanner can distinguish between tokens without the need for whitespace
+int	value=10;
+value++;
+float	factor=2.5;
+factor*=value;
+bool	isDone=value>=11

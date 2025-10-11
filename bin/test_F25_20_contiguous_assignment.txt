@@ -1,0 +1,12 @@
+// Aditya Viswanadha
+// Checks the correctness of compound assignments
+
+main
+int x = 5;
+x *= 2;
+y +=5;
+z =%7;
+// oops it was supposed to be /=, wtv ill fix it now
+z %= 7; /* there
+
+ no harm done*/

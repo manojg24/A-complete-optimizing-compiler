@@ -1,0 +1,43 @@
+// Nitish Malluru
+// Nested if statements with array operations and arithmetic expressions
+
+main
+
+int x;
+int y;
+int z;
+int[3] arr;
+
+{
+    x = call readInt();
+    y = call readInt();
+    z = call readInt();
+    
+    arr[0] = x;
+    arr[1] = y;
+    arr[2] = z;
+    
+    if (x > y) then
+        if (y > z) then
+            call printInt(arr[0] + arr[1] + arr[2]);
+        else
+            call printInt(arr[0] * arr[1]);
+        fi;
+    else
+        if (x < z) then
+            call printInt(arr[2] - arr[0]);
+        else
+            call printInt(arr[1]);
+        fi;
+    fi;
+    
+    call println();
+    
+    if (arr[0] == arr[1]) then
+        call printBool(true);
+    else
+        call printBool(false);
+    fi;
+    
+    call println();
+}.

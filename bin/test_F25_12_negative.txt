@@ -1,0 +1,9 @@
+// Author: Cameron Ederhoff
+// This test is meant to ensure negative integers are parsed properly
+
+int decrement --1;
+int space - -2;
+float negative -5.37;
+int subtraction - 4;
+float decrement_and_negative ---9.99;
+float subtraction_and_decrement - --2.83;

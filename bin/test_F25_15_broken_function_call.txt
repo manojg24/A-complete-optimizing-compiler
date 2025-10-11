@@ -1,0 +1,20 @@
+// Mason Roberson
+// Tests functions that don't use call
+// Should fail
+
+main
+
+int hold;
+
+function fail(int sent): void{
+	return;
+
+};
+
+{
+	hold = 34;
+	fail(hold);
+	hold = 45;
+	
+
+}.

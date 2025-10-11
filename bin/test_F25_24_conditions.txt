@@ -1,0 +1,18 @@
+// Author: Siqi Guo
+// test nested if statements with complex conditions
+
+int x = 10;
+int y = 20;
+int z = 30;
+bool flag = true;
+float score = 85.5;
+
+if (not x <= y or x != z or y >= z and score > 80) then
+    if (flag) then
+        score += 3.5;
+        flag = false;
+    else
+        x = x + 1;
+    fi;
+fi;
+    

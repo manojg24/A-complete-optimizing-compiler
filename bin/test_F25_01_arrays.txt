@@ -1,0 +1,23 @@
+// Array creation test
+//  Test that arrays are validated properly and created correctly.
+main
+
+int arr0;
+int[2] arr1;
+int[2][2] arr2;
+int[3][1][2] arr3;
+
+{
+  arr0 = 12;
+
+  arr1[0] = -1;
+  arr2[1][0] = 2;
+
+  call printInt( arr0 );
+  call println();
+  call printInt( arr1[0] );
+  call println();
+  call printInt( arr2[1][0] );
+  call println();
+
+}.

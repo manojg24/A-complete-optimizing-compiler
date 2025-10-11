@@ -1,0 +1,27 @@
+// Aditya Viswanadha
+
+// Tests the use of logical operators 'and' and 'or' with boolean
+// variables and the results of boolean function calls.
+
+// This should pass type-checking.
+
+main
+
+bool is_active;
+
+function is_ready() : bool {
+    return true;
+};
+
+{
+    is_active = false;
+
+    // A complex boolean expression using 'and', 'or', a boolean variable,
+    // Call to a boolean function.
+
+    if ( is_active or (call is_ready() and true) ) then
+
+        // Body of the function
+        call printInt(1);
+    fi;
+}.

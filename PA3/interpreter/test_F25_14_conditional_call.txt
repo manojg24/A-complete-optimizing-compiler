@@ -1,0 +1,32 @@
+// author: Macsen Casaus
+// Test making different function calls based on input
+
+main
+
+int a, b;
+
+{
+    a = call readInt();
+    b = call readInt();
+
+    if (a < b) then
+        call printInt(a);
+        call println();
+    else
+        call printInt(b);
+        call println();
+    fi;
+
+    if (a > b) then
+        call printInt(a);
+        call println();
+    else
+        call printInt(b);
+        call println();
+    fi;
+
+    if (a == b) then
+        call printInt(a);
+        call println();
+    fi;
+}.

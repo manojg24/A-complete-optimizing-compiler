@@ -1,0 +1,21 @@
+// author: Manoj Gangaraja
+// Testing basic assignment of identifiers, keywords and numbers.
+//Checking Block comments and error cases
+
+int a = 5; //Assigning value to variable a
+if(a>5)
+{
+print ok;
+}
+else
+{
+int b = -5;
+}
+if(a!=b)
+{
+do nothing /* Do acts like a control flow statement and not identifier */
+}
+else
+{
+float c = 12.; // Cause ERROR
+}

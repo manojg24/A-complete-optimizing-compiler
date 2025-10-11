@@ -1,0 +1,20 @@
+// Andy Chiu
+// test (untested) combinations of keywords, some may form a valid ident, case sensitivity
+
+iffi if##fi if//fi -- ++ if.1 fi float,if while* ^^
+              ^ comment af|er th!s
+
+if.1 fi float,if while*if while/(*/if  ^^
+
+IF WHILE
+
+:IF: ;;;;IF;;;; ::;:;::
+
+++1.a
+
+=+= do__ /d d%%..%% 0/000
+
+:) :
+
+10=?;:(
+

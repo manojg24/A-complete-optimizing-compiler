@@ -1,0 +1,41 @@
+// Renjie Li
+// Function Overload
+
+main
+
+int t;
+int i;
+bool b;
+
+
+function foo(int a, bool b) : int {
+  a += 1;
+  if ( b ) then
+    return a - 2;
+  else
+    return a - 1;
+  fi;
+};
+
+function foo(bool a, int b) : int {
+  b += 1;
+  if( a ) then
+    return b + 2;
+  else
+    return b + 1;
+  fi;
+};
+
+{
+    t = call readInt();
+
+    if (t == 1) then
+        i = call readInt();
+        b = call readBool();
+        call printInt(call foo(i, b));
+    else 
+        i = call readInt();
+        b = call readBool();
+        call printInt(call foo(b, i));
+    fi; 
+}.

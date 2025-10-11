@@ -1,0 +1,28 @@
+// read and print int const and vars
+main
+
+int x;
+float fX;
+bool bX;
+
+{
+    call printInt(1);
+    call printFloat(2.50);
+    call printBool(false);
+    call println();
+    
+    x = call readInt();
+
+    call printInt(x);
+    call println();
+
+    fX = call readFloat();
+
+    call printFloat(fX);
+    call println();
+
+    bX = call readBool();
+
+    call printBool(bX);
+    call println();
+}.

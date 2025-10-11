@@ -1,0 +1,11 @@
+// Alex Beamer
+// tests a function call inside the param list of another function call.
+
+main
+
+{
+    call printInt( call readInt() );
+    call println();
+    call printBool( call readBool() );
+    call println();
+}.

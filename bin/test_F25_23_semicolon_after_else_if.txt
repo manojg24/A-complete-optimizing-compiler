@@ -1,0 +1,13 @@
+// author: Will Tatum
+// tests for semicolon after inner if
+
+main
+{
+    if (1 == 2) then
+        call println();
+    else
+        if (3 == 3) then
+            call println();
+        fi            // <-- ERROR: missing semicolon here
+    fi;
+}.

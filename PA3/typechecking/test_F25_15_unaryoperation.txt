@@ -1,0 +1,32 @@
+//Manoj Gangaraja
+
+// Tests the type-checking of various compound assignment operators
+// have compatible types for each operation.
+// This should pass type-checking.
+
+main
+
+int i, j;
+float x, y;
+
+function get_five() : int {
+    return 5;
+};
+
+{
+    i = 10;
+    j = 2;
+    x = 10.0;
+    y = 2.0;
+
+    // Test compound assignments with two integers
+    i += j;         // Valid: int += int
+    i -= 3;         // Valid: int -= int literal
+    i *= call get_five(); // Valid: int *= int from function call
+
+    // Test compound assignments with two floats
+    x += y;         // Valid: float += float
+    x -= 3.0;       // Valid: float -= float literal
+    x /= 2.0;       // Valid: float /= float literal
+
+}.

@@ -1,0 +1,12 @@
+// Author: Aditya Viswanadha
+// Should fail as empty statement after 'then' is not allowed 
+// statSeq requires statement ';'
+
+main
+{
+    if (true) then
+        ;
+    else
+        return;
+    fi;
+}.

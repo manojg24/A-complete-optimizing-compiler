@@ -1,0 +1,35 @@
+// Aiden Loyd
+// Tests that recursive functions (both self and mutual) are properly handled.
+// Type-check should succeed
+
+main
+
+function isOdd(int number): bool {
+	if (number == 0) then
+		return false;
+	else
+		return call isEven(number - 1);
+	fi;
+};
+
+function isEven(int number): bool {
+	if (number == 0) then
+		return false;
+	else
+		return call isOdd(number - 1);
+	fi;
+};
+
+function pow(int number, int exp): int {
+	if (exp == 0) then
+		return 1;
+	else
+		return number * call pow(number, exp - 1);
+	fi;
+};
+
+{
+	call printBool(call isEven(call readInt()));
+	call printBool(call isEven(call readInt()));
+	call printInt(call pow(call readInt(), call readInt()));
+}.

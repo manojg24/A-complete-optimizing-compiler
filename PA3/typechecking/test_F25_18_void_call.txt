@@ -1,0 +1,18 @@
+// Andrew Li
+// test that passing void into function is type error
+
+main
+
+function void_func () : void
+{
+    return;
+};
+
+function foo (int i) : void
+{
+    return;
+};
+
+{
+    call foo(call void_func());
+}.

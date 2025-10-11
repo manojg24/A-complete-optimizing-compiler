@@ -1,0 +1,12 @@
+// author: Liam Swain
+// This test is meant to be a sunny day test that uses various spacing, including begining and ending spaces,
+// trailing spaces, tabs, and varying spacing between tokens.
+
+    main  
+    int var1  = ==   = =   ===    12
+    
+    
+
+var2   if   equal		;
+		;;	;
+	

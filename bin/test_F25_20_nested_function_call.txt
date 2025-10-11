@@ -1,0 +1,16 @@
+// Manoj Gangaraja
+// Tests nested function call
+
+main
+function outer(): void{
+	return;
+};
+function inner(): void{
+	return;
+};
+{
+
+    // Call the nested function
+    call inner(call outer());
+
+}.

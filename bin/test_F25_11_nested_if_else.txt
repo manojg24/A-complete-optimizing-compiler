@@ -1,0 +1,18 @@
+// Isaiah Branch
+// tests nested if-then-else statements and the "dangling else" problem.
+
+main
+
+int score;
+int grade;
+
+{
+    score = 85;
+    grade = 0;
+
+    if (score > 50) then
+        if (score < 90) then
+            grade = 1;
+        else
+            grade = 2;
+}.

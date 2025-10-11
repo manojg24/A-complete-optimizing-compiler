@@ -1,0 +1,21 @@
+// Aiden Loyd
+// Tests that early returns are handled correctly
+
+main
+
+int a;
+int b;
+int sum;
+bool continue;
+
+{
+	a = call readInt();
+	continue = call readBool();
+	if (not continue) then
+		return;
+	fi;
+
+	b = call readInt();
+	sum = a + b;
+	call printInt(sum);
+}.

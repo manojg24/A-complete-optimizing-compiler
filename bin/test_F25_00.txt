@@ -1,0 +1,3 @@
+// should not see; if see this, scanner is wrong
+====
+----
