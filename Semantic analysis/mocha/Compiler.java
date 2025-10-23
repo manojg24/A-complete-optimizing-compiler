@@ -805,18 +805,30 @@ public class Compiler {
         public List<BasicBlock> blocks() { return blocks; }
     }
     
+    private static final class BlockFactory {
+        private final List<BasicBlock> all;
+        private int nextNo = 1;
+        BlockFactory(List<BasicBlock> sink){ this.all = sink; }
+        BasicBlock newBB(){ BasicBlock b = new BasicBlock(nextNo++); all.add(b); return b; }
+    }
+    
+
     public IR genIR(ast.AST ast) {
-        // Create a trivial CFG with a single empty basic block so things run.
-    	BasicBlock bb = new BasicBlock(1);
-        IRBuilder b = new IRBuilder(bb);
-        // walk the main statement sequence and emit TAC
+    	IRBuilder builder = new IRBuilder();   // owns its own block list and starts with bb1
+
         if (ast != null && ast.getRoot() != null) {
-            ast.getRoot().mainStatementSequence().accept(b);
+            // functions first (if any)
+            for (AST.Declaration d : ast.getRoot().functions()) {
+                if (d instanceof AST.FunctionDeclaration fd) {
+                    fd.accept(builder); // IRBuilder.visit(FunctionDeclaration)
+                }
+            }
+            // main body
+            ast.getRoot().mainStatementSequence().accept(builder);
         }
-        List<BasicBlock> blocks = new ArrayList<>();
-        blocks.add(bb);
-        this.currentIR = new IR(blocks);
-        return this.currentIR;
+
+        currentIR = new IR(builder.getBlocks());
+        return currentIR;
     }
     
     private static class NodeVisitorAdapter implements ast.NodeVisitor {
@@ -866,50 +878,69 @@ public class Compiler {
     }
     
     private final class IRBuilder extends NodeVisitorAdapter {
-        private final BasicBlock bb;
-        private int nextId = 1;      // TAC ids
-        private int tmpIdx = 0;      // temp variable counter
+    	private final List<BasicBlock> blocks = new ArrayList<>();
+        private BasicBlock cur;
+        private int nextTacId = 1;
+        private int tmpCounter = 0;
 
-        IRBuilder(BasicBlock bb){ this.bb = bb; }
+        IRBuilder() { cur = newBB(); }
 
-        // ---- helpers ----
-        private Variable v(String name) {
-            // Symbol(Type) might be needed in your Symbol; using null type is OK for printing.
-            return new Variable(new mocha.Symbol(name, null));
+        List<BasicBlock> getBlocks() { return blocks; }
+
+        private BasicBlock newBB() {
+            BasicBlock b = new BasicBlock(blocks.size() + 1);
+            blocks.add(b);
+            return b;
         }
-        private Variable newTmp() { return v("_t" + (++tmpIdx)); }
-        private int newId() { return nextId++; }
 
-        private Value toValue(ast.Expression e) {
+        private int newId() { return nextTacId++; }
+        private Variable newTmp() { return v("_t" + (++tmpCounter)); }
+        private Variable v(String name) { return new Variable(new mocha.Symbol(name, null)); }
+
+        /** Lower an expression to a Value (using temps & TAC when needed). */
+        private Value val(ast.Expression e) {
             if (e instanceof AST.IntegerLiteral il) return new Literal(il.getValue());
             if (e instanceof AST.FloatLiteral   fl) return new Literal(fl.getValue());
             if (e instanceof AST.BoolLiteral    bl) return new Literal(bl.getValue());
             if (e instanceof AST.Identifier     id) return v(id.getName());
 
-            // handle binary expressions by materializing into a tmp
             if (e instanceof AST.Addition add) {
-                Value l = toValue(add.getLeft());
-                Value r = toValue(add.getRight());
+                Value L = val(add.getLeft()), R = val(add.getRight());
                 Variable t = newTmp();
-                bb.addInstruction(new Add(newId(), t, l, r));
+                cur.addInstruction(new Add(newId(), t, L, R));
                 return t;
             }
             if (e instanceof AST.Multiplication mul) {
-                Value l = toValue(mul.getLeft());
-                Value r = toValue(mul.getRight());
+                Value L = val(mul.getLeft()), R = val(mul.getRight());
                 Variable t = newTmp();
-                // You only defined Add.java in ir.tac; reuse Assign with op="mul" quickly:
-                bb.addInstruction(new Assign(newId(), t, l, r) {
-                    @Override protected String op() { return "mul"; }
-                });
+                cur.addInstruction(new Assign(newId(), t, L, R) { @Override protected String op(){ return "mul"; }});
                 return t;
             }
-
-            // fallback: literal wrapper (will print something reasonable)
+            if (e instanceof AST.Relation rel) {
+                Value L = val(rel.getLeft()), R = val(rel.getRight());
+                Variable t = newTmp();
+                final String op = switch (rel.getOperator()) {
+                    case "==" -> "cmpeq"; case "!=" -> "cmpne";
+                    case "<"  -> "cmplt"; case "<=" -> "cmple";
+                    case ">"  -> "cmpgt"; case ">=" -> "cmpge";
+                    default -> "cmp?";
+                };
+                cur.addInstruction(new Assign(newId(), t, L, R){ @Override protected String op(){ return op; }});
+                return t;
+            }
+            if (e instanceof AST.FunctionCall fc) {
+                java.util.ArrayList<Value> args = new java.util.ArrayList<>();
+                for (ast.Expression a : fc.getArguments().getArguments()) args.add(val(a));
+                Variable t = newTmp(); // capture return
+                cur.addInstruction(new Call(newId(), new mocha.Symbol(fc.getIdentifier().getName(), null), args, t));
+                return t;
+            }
+            // fallback
             return new Literal(e);
         }
 
-        // ---- visitors we actually need for your sample ----
+        // --------------------- statements ---------------------
+
         @Override
         public void visit(AST.StatementSequence node) {
             for (ast.Statement s : node) if (s != null) s.accept(this);
@@ -917,43 +948,84 @@ public class Compiler {
 
         @Override
         public void visit(AST.Assignment node) {
-            // dest must be an Identifier in your sample
             if (!(node.getDestination() instanceof AST.Identifier id))
-                throw new RuntimeException("Only simple assignments supported in this minimal builder.");
+                throw new RuntimeException("Only simple lvalues supported in this minimal builder.");
             Variable dst = v(id.getName());
-            Value rhs = toValue(node.getSource());
-
-            // Emit "dst = add/mul/..." or simple "dst = literal"
-            if (rhs instanceof Literal || rhs instanceof Variable) {
-                // represent plain copy as an "add x 0" or define a dedicated Move op
-                bb.addInstruction(new Assign(newId(), dst, rhs, null) {
-                    @Override protected String op() { return "mov"; }
-                    @Override public String toString() { return dst + " = " + (rhs instanceof Literal ? rhs.toString() : ((Variable)rhs).toString()); }
-                });
-            } else {
-                // rhs already materialized into a temp by toValue()
-                bb.addInstruction(new Assign(newId(), dst, rhs, null) {
-                    @Override protected String op() { return "mov"; }
-                    @Override public String toString() { return dst + " = " + rhs; }
-                });
-            }
+            Value rhs = val(node.getSource());
+            cur.addInstruction(new Assign(newId(), dst, rhs, null) {
+                @Override protected String op(){ return "mov"; }
+                @Override public String toString(){ return dst + " = " + (rhs==null ? "" : rhs.toString()); }
+            });
         }
 
         @Override
-        public void visit(AST.FunctionCall n) {
-            // only need "call printInt(y)" for your input
-            java.util.List<Value> args = new java.util.ArrayList<>();
-            for (ast.Expression e : n.getArguments().getArguments()) args.add(toValue(e));
-            bb.addInstruction(new Call(newId(), new mocha.Symbol(n.getIdentifier().getName(), null), args));
+        public void visit(AST.FunctionCall node) {
+            java.util.ArrayList<Value> args = new java.util.ArrayList<>();
+            for (ast.Expression e : node.getArguments().getArguments()) args.add(val(e));
+            // void call
+            cur.addInstruction(new Call(newId(), new mocha.Symbol(node.getIdentifier().getName(), null), args));
         }
 
-        // Unused visitors (no-ops)
+        @Override
+        public void visit(AST.IfStatement n) {
+            BasicBlock thenBB = newBB();
+            BasicBlock joinBB = newBB();
+            BasicBlock elseBB = (n.getElseBlock() != null) ? newBB() : null;
+
+            Value cond = val(n.getCondition());
+            cur.addInstruction(new Assign(newId(), newTmp(), cond, null) {
+                @Override protected String op(){ return "test"; }
+                @Override public String toString(){
+                    return "if " + cond + " goto " + thenBB.dotNodeName() +
+                            (elseBB!=null ? " else " + elseBB.dotNodeName() : " else " + joinBB.dotNodeName());
+                }
+            });
+            cur.addSuccessor(thenBB);
+            cur.addSuccessor(elseBB != null ? elseBB : joinBB);
+
+            // THEN
+            BasicBlock saved = cur;
+            cur = thenBB;
+            n.getThenBlock().accept(this);
+            cur.addSuccessor(joinBB);
+
+            // ELSE (optional)
+            if (elseBB != null) {
+                cur = elseBB;
+                n.getElseBlock().accept(this);
+                cur.addSuccessor(joinBB);
+            }
+
+            // continue at join
+            cur = joinBB;
+        }
+
+        @Override
+        public void visit(AST.ReturnStatement n) {
+            // your AST uses getValue() (not getExpression()); keep consistent with your MiniInterpreter
+            ast.Expression e = n.getValue();
+            final Value v = (e != null) ? val(e) : null;
+            cur.addInstruction(new Assign(newId(), newTmp(), v, null) {
+                @Override protected String op(){ return "ret"; }
+                @Override public String toString(){ return "return " + (v==null? "" : v.toString()); }
+            });
+        }
+
+        @Override
+        public void visit(AST.FunctionDeclaration n) {
+            // start a fresh block for each function; add a visible label line
+            cur = newBB();
+            cur.addInstruction(new Assign(newId(), newTmp(), null, null) {
+                @Override protected String op(){ return "label"; }
+                @Override public String toString(){ return "<" + n.getIdentifier().getName() + ">"; }
+            });
+            n.getBody().getStatements().accept(this);
+        }
+
+        // no-ops for everything else
         @Override public void visit(AST.VariableDeclaration n) {}
-        @Override public void visit(AST.IfStatement n) {}
         @Override public void visit(AST.WhileStatement n) {}
         @Override public void visit(AST.RepeatStatement n) {}
-        @Override public void visit(AST.ReturnStatement n) {}
-        @Override public void visit(AST.Relation n) {}
         @Override public void visit(AST.LogicalAnd n) {}
         @Override public void visit(AST.LogicalOr n) {}
         @Override public void visit(AST.LogicalNot n) {}
@@ -974,6 +1046,7 @@ public class Compiler {
         @Override public void visit(AST.FloatLiteral n) {}
         @Override public void visit(AST.IntegerLiteral n) {}
         @Override public void visit(AST.BoolLiteral n) {}
+   
     }
 
     /** Run selected optimizations and return DOT text of the resulting IR. */
