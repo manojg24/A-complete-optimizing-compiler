@@ -812,6 +812,160 @@ public class Compiler {
         BasicBlock newBB(){ BasicBlock b = new BasicBlock(nextNo++); all.add(b); return b; }
     }
     
+    
+    
+	// --------------------- Local IR Optimizer ---------------------
+	class Optimizer {
+
+	    public List<ir.cfg.BasicBlock> optimize(List<ir.cfg.BasicBlock> blocks){
+	        for (ir.cfg.BasicBlock bb : blocks) optimizeBlock(bb);
+	        return blocks;
+	    }
+
+	    private boolean isPure(String op){
+	        if (op == null) return false;
+	        return switch (op) {
+	            case "add","sub","mul","div","mod",
+	                 "cmpeq","cmpne","cmplt","cmple","cmpgt","cmpge","mov" -> true;
+	            default -> false;
+	        };
+	    }
+
+	    private String keyOf(ir.tac.Value v){
+	        if (v == null) return "_";
+	        if (v instanceof ir.tac.Literal l) return "K:"+String.valueOf(l.value());
+	        return "V:"+v.toString();
+	    }
+
+	    private ir.tac.Assign newAssignLike(ir.tac.Assign a, ir.tac.Variable d, ir.tac.Value L, ir.tac.Value R){
+	        final String op = a.opcode();
+	        return new ir.tac.Assign(a.id(), d, L, R){ @Override protected String op(){ return op; }};
+	    }
+
+	    private ir.tac.Value tryFold(String op, ir.tac.Value L, ir.tac.Value R){
+	        if (!(L instanceof ir.tac.Literal) || (R != null && !(R instanceof ir.tac.Literal))) return null;
+	        Object l = ((ir.tac.Literal)L).value();
+	        Object r = (R==null) ? null : ((ir.tac.Literal)R).value();
+	        try {
+	            switch (op) {
+	                case "mov":   return L;
+	                case "add":   if (l instanceof Integer i && r instanceof Integer j) return new ir.tac.Literal(i+j);
+	                              if (l instanceof Float   i && r instanceof Float   j) return new ir.tac.Literal(i+j); break;
+	                case "sub":   if (l instanceof Integer i && r instanceof Integer j) return new ir.tac.Literal(i-j);
+	                              if (l instanceof Float   i && r instanceof Float   j) return new ir.tac.Literal(i-j); break;
+	                case "mul":   if (l instanceof Integer i && r instanceof Integer j) return new ir.tac.Literal(i*j);
+	                              if (l instanceof Float   i && r instanceof Float   j) return new ir.tac.Literal(i*j); break;
+	                case "div":   if (l instanceof Integer i && r instanceof Integer j) return new ir.tac.Literal(i/j);
+	                              if (l instanceof Float   i && r instanceof Float   j) return new ir.tac.Literal(i/j); break;
+	                case "cmpeq": return new ir.tac.Literal(java.util.Objects.equals(l, r));
+	                case "cmpne": return new ir.tac.Literal(!java.util.Objects.equals(l, r));
+	                case "cmplt": if (l instanceof Comparable cl && r instanceof Comparable cr) return new ir.tac.Literal(cl.compareTo(cr) < 0);
+	                               break;
+	                case "cmple": if (l instanceof Comparable cl && r instanceof Comparable cr) return new ir.tac.Literal(cl.compareTo(cr) <= 0);
+	                               break;
+	                case "cmpgt": if (l instanceof Comparable cl && r instanceof Comparable cr) return new ir.tac.Literal(cl.compareTo(cr) > 0);
+	                               break;
+	                case "cmpge": if (l instanceof Comparable cl && r instanceof Comparable cr) return new ir.tac.Literal(cl.compareTo(cr) >= 0);
+	                               break;
+	            }
+	        } catch (Throwable ignore) {}
+	        return null;
+	    }
+
+	    private void optimizeBlock(ir.cfg.BasicBlock bb){
+	        // ------- forward pass: CP/CF/CSE -------
+	        java.util.Map<String, ir.tac.Value> env = new java.util.HashMap<>();
+	        java.util.Map<String, ir.tac.Variable> cse = new java.util.HashMap<>();
+	        java.util.List<ir.tac.TAC> out = new java.util.ArrayList<>();
+
+	        for (ir.tac.TAC t : bb) {
+	            if (t instanceof ir.tac.Assign a){
+	                String op = a.opcode();
+
+	                // barriers → clear env/cse, keep as-is
+	                if ("label".equals(op) || "test".equals(op) || "ret".equals(op)) {
+	                    env.clear(); cse.clear(); out.add(t); continue;
+	                }
+
+	                ir.tac.Value L = a.left();
+	                if (L instanceof ir.tac.Variable v && env.containsKey(v.toString())) L = env.get(v.toString());
+	                ir.tac.Value R = a.right();
+	                if (R instanceof ir.tac.Variable v2 && env.containsKey(v2.toString())) R = env.get(v2.toString());
+
+	                if ("mov".equals(op)){
+	                    env.put(a.dest().toString(), L);
+	                    out.add(new ir.tac.Assign(a.id(), a.dest(), L, null){ @Override protected String op(){ return "mov"; }});
+	                    continue;
+	                }
+
+	                // constant fold
+	                ir.tac.Value cf = tryFold(op, L, R);
+	                if (cf != null){
+	                    env.put(a.dest().toString(), cf);
+	                    out.add(new ir.tac.Assign(a.id(), a.dest(), cf, null){ @Override protected String op(){ return "mov"; }});
+	                    continue;
+	                }
+
+	                // CSE for pure ops with two operands
+	                if (R != null && isPure(op)){
+	                    String key = op + "|" + keyOf(L) + "|" + keyOf(R);
+	                    ir.tac.Variable prev = cse.get(key);
+	                    if (prev != null){
+	                        env.put(a.dest().toString(), prev);
+	                        out.add(new ir.tac.Assign(a.id(), a.dest(), prev, null){ @Override protected String op(){ return "mov"; }});
+	                        continue;
+	                    } else {
+	                        cse.put(key, a.dest());
+	                    }
+	                }
+
+	                // propagate operands
+	                out.add(newAssignLike(a, a.dest(), L, R));
+	                if ("mov".equals(op) && (L instanceof ir.tac.Literal || L instanceof ir.tac.Variable)){
+	                    env.put(a.dest().toString(), L);
+	                } else {
+	                    env.remove(a.dest().toString());
+	                }
+	            } else if (t instanceof ir.tac.Call c){
+	                // calls are side-effecting
+	                env.clear(); cse.clear();
+	                out.add(t);
+	            } else {
+	                out.add(t);
+	            }
+	        }
+
+	        // ------- backward pass: DCE -------
+	        java.util.Set<String> live = new java.util.HashSet<>();
+	        java.util.List<ir.tac.TAC> pruned = new java.util.ArrayList<>();
+	        for (int i = out.size()-1; i>=0; --i){
+	            ir.tac.TAC t = out.get(i);
+	            if (t instanceof ir.tac.Assign a){
+	                String op = a.opcode();
+	                // add uses
+	                if (a.left() instanceof ir.tac.Variable v) live.add(v.toString());
+	                if (a.right()!=null && a.right() instanceof ir.tac.Variable v2) live.add(v2.toString());
+
+	                boolean essential = "label".equals(op) || "test".equals(op) || "ret".equals(op);
+	                String def = (a.dest()==null)? null : a.dest().toString();
+	                if (!essential && def != null && !live.contains(def)){
+	                    // dead store - skip
+	                    continue;
+	                }
+	                if (def != null) live.remove(def);
+	                pruned.add(0, t);
+	            } else {
+	                pruned.add(0, t);
+	            }
+	        }
+
+	        bb.instructions().clear();
+	        bb.instructions().addAll(pruned);
+	    }
+	}
+    
+    
+    
 
     public IR genIR(ast.AST ast) {
     	IRBuilder builder = new IRBuilder();   // owns its own block list and starts with bb1
@@ -828,8 +982,94 @@ public class Compiler {
         }
 
         currentIR = new IR(builder.getBlocks());
-        return currentIR;
+        new Optimizer().optimize(currentIR.blocks());
+        CFGSimplifier.simplify(currentIR.blocks());
+	    return currentIR;
     }
+    
+    private static final class CFGSimplifier {
+
+    	  static void simplify(java.util.List<BasicBlock> blocks) {
+    	    if (blocks == null || blocks.isEmpty()) return;
+
+    	    // ---- 0) Determine the real entry: first block with no preds ----
+    	    BasicBlock entry = null;
+    	    for (BasicBlock b : blocks) {
+    	      java.util.List<BasicBlock> ps = b.preds();
+    	      if (ps == null || ps.isEmpty()) { entry = b; break; }
+    	    }
+    	    if (entry == null) entry = blocks.get(0);
+
+    	    // ---- 1) For each block, fold constant test if pattern matches ----
+    	    for (BasicBlock bb : blocks) {
+    	      java.util.List<ir.tac.TAC> ins = bb.instructions();
+    	      if (ins == null || ins.size() < 2) continue;
+
+    	      ir.tac.TAC last   = ins.get(ins.size() - 1);
+    	      ir.tac.TAC before = ins.get(ins.size() - 2);
+
+    	      if (!(last   instanceof ir.tac.Assign br))   continue;
+    	      if (!(before instanceof ir.tac.Assign def))  continue;
+
+    	      // 'last' must be the branch/test instruction
+    	      if (!"test".equals(br.opcode())) continue;
+
+    	      // 'before' must define the same temp used in the test, with a mov bool
+    	      if (!(def.dest() instanceof ir.tac.Variable)) continue;
+    	      if (!(br.left()  instanceof ir.tac.Variable)) continue;
+    	      if (!def.dest().toString().equals(br.left().toString())) continue;
+    	      if (!"mov".equals(def.opcode())) continue;
+    	      if (!(def.left() instanceof ir.tac.Literal lit)) continue;
+    	      if (!(lit.value() instanceof Boolean)) continue;
+
+    	      boolean cond = (Boolean) lit.value();
+
+    	      // we expect exactly 2 successors: [fall-through, branch]
+    	      java.util.List<BasicBlock> succs = bb.succs();
+    	      if (succs == null || succs.size() != 2) continue;
+
+    	      BasicBlock keep = cond ? succs.get(0) : succs.get(1);
+    	      BasicBlock kill = cond ? succs.get(1) : succs.get(0);
+
+    	      // prune edge to the un-taken successor
+    	      succs.remove(kill);
+    	      java.util.List<BasicBlock> pk = kill.preds();
+    	      if (pk != null) pk.remove(bb);
+
+    	      // (optional) remove the final 'test' since it’s now unconditional
+    	      // ins.remove(ins.size() - 1);
+    	    }
+
+    	    // ---- 2) Reachability from ALL roots (one per function) ----
+    	    java.util.HashSet<BasicBlock> vis = new java.util.HashSet<>();
+    	    java.util.ArrayDeque<BasicBlock> q = new java.util.ArrayDeque<>();
+
+    	    for (BasicBlock b : blocks) {
+    	        java.util.List<BasicBlock> ps = b.preds();
+    	        if (ps == null || ps.isEmpty()) {
+    	            if (vis.add(b)) q.addLast(b);
+    	        }
+    	    }
+    	    // fallback: keep something if none detected
+    	    if (vis.isEmpty() && !blocks.isEmpty()) {
+    	        vis.add(blocks.get(0));
+    	        q.addLast(blocks.get(0));
+    	    }
+
+    	    while (!q.isEmpty()) {
+    	        BasicBlock b = q.removeFirst();
+    	        java.util.List<BasicBlock> succs = b.succs();
+    	        if (succs == null) continue;
+    	        for (BasicBlock s : succs) {
+    	            if (vis.add(s)) q.addLast(s);
+    	        }
+    	    }
+
+    	    // ---- 3) Drop unreachable blocks ----
+    	    blocks.removeIf(b -> !vis.contains(b));
+
+    	  }
+    	}
     
     private static class NodeVisitorAdapter implements ast.NodeVisitor {
         // literals / ids

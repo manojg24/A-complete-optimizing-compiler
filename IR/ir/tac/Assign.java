@@ -27,4 +27,8 @@ public abstract class Assign extends TAC{
     }
 
     @Override public void accept(TACVisitor v){ v.visit(this); }
+    
+    public final String opcode() { 
+        return op(); 
+    }
 }
