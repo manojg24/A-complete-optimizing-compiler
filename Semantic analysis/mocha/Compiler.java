@@ -989,84 +989,83 @@ public class Compiler {
     
     private static final class CFGSimplifier {
 
-    	  static void simplify(java.util.List<BasicBlock> blocks) {
+    	static void simplify(java.util.List<BasicBlock> blocks) {
     	    if (blocks == null || blocks.isEmpty()) return;
 
-    	    // ---- 0) Determine the real entry: first block with no preds ----
-    	    BasicBlock entry = null;
-    	    for (BasicBlock b : blocks) {
-    	      java.util.List<BasicBlock> ps = b.preds();
-    	      if (ps == null || ps.isEmpty()) { entry = b; break; }
-    	    }
-    	    if (entry == null) entry = blocks.get(0);
-
-    	    // ---- 1) For each block, fold constant test if pattern matches ----
+    	    // ---- 1) Constant branch folding (two shapes) ----
     	    for (BasicBlock bb : blocks) {
     	      java.util.List<ir.tac.TAC> ins = bb.instructions();
-    	      if (ins == null || ins.size() < 2) continue;
+    	      if (ins == null || ins.isEmpty()) continue;
 
-    	      ir.tac.TAC last   = ins.get(ins.size() - 1);
-    	      ir.tac.TAC before = ins.get(ins.size() - 2);
-
-    	      if (!(last   instanceof ir.tac.Assign br))   continue;
-    	      if (!(before instanceof ir.tac.Assign def))  continue;
-
-    	      // 'last' must be the branch/test instruction
+    	      ir.tac.TAC last = ins.get(ins.size() - 1);
+    	      if (!(last instanceof ir.tac.Assign br)) continue;
     	      if (!"test".equals(br.opcode())) continue;
 
-    	      // 'before' must define the same temp used in the test, with a mov bool
-    	      if (!(def.dest() instanceof ir.tac.Variable)) continue;
-    	      if (!(br.left()  instanceof ir.tac.Variable)) continue;
-    	      if (!def.dest().toString().equals(br.left().toString())) continue;
-    	      if (!"mov".equals(def.opcode())) continue;
-    	      if (!(def.left() instanceof ir.tac.Literal lit)) continue;
-    	      if (!(lit.value() instanceof Boolean)) continue;
+    	      Boolean condConst = null;
 
-    	      boolean cond = (Boolean) lit.value();
+    	      // Shape A: test <Literal true/false>
+    	      if (br.left() instanceof ir.tac.Literal litA && litA.value() instanceof Boolean) {
+    	        condConst = (Boolean) litA.value();
+    	      }
+    	      // Shape B:  ... ; t = mov true/false ; test t
+    	      else if (ins.size() >= 2) {
+    	        ir.tac.TAC before = ins.get(ins.size() - 2);
+    	        if (before instanceof ir.tac.Assign def
+    	            && "mov".equals(def.opcode())
+    	            && def.left() instanceof ir.tac.Literal litB
+    	            && litB.value() instanceof Boolean
+    	            && def.dest() != null
+    	            && br.left() instanceof ir.tac.Variable
+    	            && def.dest().toString().equals(((ir.tac.Variable) br.left()).toString())) {
+    	          condConst = (Boolean) litB.value();
+    	        }
+    	      }
 
-    	      // we expect exactly 2 successors: [fall-through, branch]
+    	      if (condConst == null) continue;
+
     	      java.util.List<BasicBlock> succs = bb.succs();
     	      if (succs == null || succs.size() != 2) continue;
 
-    	      BasicBlock keep = cond ? succs.get(0) : succs.get(1);
-    	      BasicBlock kill = cond ? succs.get(1) : succs.get(0);
+    	      BasicBlock keep = condConst ? succs.get(0) : succs.get(1);
+    	      BasicBlock kill = condConst ? succs.get(1) : succs.get(0);
 
-    	      // prune edge to the un-taken successor
+    	      // prune untaken edge
     	      succs.remove(kill);
     	      java.util.List<BasicBlock> pk = kill.preds();
     	      if (pk != null) pk.remove(bb);
 
-    	      // (optional) remove the final 'test' since it’s now unconditional
+    	      // (optional) remove the final 'test' TAC:
     	      // ins.remove(ins.size() - 1);
     	    }
 
-    	    // ---- 2) Reachability from ALL roots (one per function) ----
-    	    java.util.HashSet<BasicBlock> vis = new java.util.HashSet<>();
-    	    java.util.ArrayDeque<BasicBlock> q = new java.util.ArrayDeque<>();
+    	    // ---- 2) Reachability from ALL true roots (function entries + first block) ----
+    	    java.util.HashSet<BasicBlock> visited = new java.util.HashSet<>();
+    	    java.util.ArrayDeque<BasicBlock> queue = new java.util.ArrayDeque<>();
 
+    	    // roots = blocks that start with a 'label' (function entries)
     	    for (BasicBlock b : blocks) {
-    	        java.util.List<BasicBlock> ps = b.preds();
-    	        if (ps == null || ps.isEmpty()) {
-    	            if (vis.add(b)) q.addLast(b);
-    	        }
+    	      java.util.List<ir.tac.TAC> ins = b.instructions();
+    	      boolean isFuncEntry = ins != null && !ins.isEmpty()
+    	          && (ins.get(0) instanceof ir.tac.Assign a0)
+    	          && "label".equals(a0.opcode());
+    	      if (isFuncEntry) {
+    	        if (visited.add(b)) queue.addLast(b);
+    	      }
     	    }
-    	    // fallback: keep something if none detected
-    	    if (vis.isEmpty() && !blocks.isEmpty()) {
-    	        vis.add(blocks.get(0));
-    	        q.addLast(blocks.get(0));
-    	    }
+    	    // also include the very first block (main entry)
+    	    if (!blocks.isEmpty() && visited.add(blocks.get(0))) queue.addLast(blocks.get(0));
 
-    	    while (!q.isEmpty()) {
-    	        BasicBlock b = q.removeFirst();
-    	        java.util.List<BasicBlock> succs = b.succs();
-    	        if (succs == null) continue;
-    	        for (BasicBlock s : succs) {
-    	            if (vis.add(s)) q.addLast(s);
-    	        }
+    	    while (!queue.isEmpty()) {
+    	      BasicBlock b = queue.removeFirst();
+    	      java.util.List<BasicBlock> succs = b.succs();
+    	      if (succs == null) continue;
+    	      for (BasicBlock s : succs) {
+    	        if (visited.add(s)) queue.addLast(s);
+    	      }
     	    }
 
     	    // ---- 3) Drop unreachable blocks ----
-    	    blocks.removeIf(b -> !vis.contains(b));
+    	    blocks.removeIf(b -> !visited.contains(b));
 
     	  }
     	}
