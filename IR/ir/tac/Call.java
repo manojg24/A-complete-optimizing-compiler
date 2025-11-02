@@ -10,7 +10,7 @@ public class Call extends TAC {
     private final Symbol function;
     private final List<Value> args;
     private final Variable dest; // null => void call
-
+    
     /** Void call */
     public Call(int id, Symbol function, List<Value> args){
         this(id, function, args, null);
@@ -25,6 +25,7 @@ public class Call extends TAC {
     }
 
     public Symbol function(){ return function; }
+    public Symbol sym() { return function;}
     public List<Value> args(){ return args; }
     public Variable dest(){ return dest; }
 
