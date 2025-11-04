@@ -59,6 +59,15 @@ public class Compiler {
     public boolean hasError() {
         return errorBuffer.length() != 0;
     }
+    
+ // Warnings (for uninitialized uses, etc.)
+    private final java.util.List<String> warnings = new java.util.ArrayList<>();
+    private void warn(int line, int col, String msg) {
+        String m = "Warning(" + line + "," + col + ")[" + msg + "]";
+        warnings.add(m);
+        System.out.println(m); // or collect-only if you prefer
+    }
+    public java.util.List<String> getWarnings(){ return warnings; }
 
     private class QuitParseException extends RuntimeException {
         private static final long serialVersionUID = 1L;
@@ -825,7 +834,7 @@ public class Compiler {
 	    private boolean isPure(String op){
 	        if (op == null) return false;
 	        return switch (op) {
-	            case "add","sub","mul","div","mod",
+	            case "add","sub","mul","div","mod","pow",
 	                 "cmpeq","cmpne","cmplt","cmple","cmpgt","cmpge","mov" -> true;
 	            default -> false;
 	        };
@@ -857,6 +866,26 @@ public class Compiler {
 	                              if (l instanceof Float   i && r instanceof Float   j) return new ir.tac.Literal(i*j); break;
 	                case "div":   if (l instanceof Integer i && r instanceof Integer j) return new ir.tac.Literal(i/j);
 	                              if (l instanceof Float   i && r instanceof Float   j) return new ir.tac.Literal(i/j); break;
+	                case "pow":
+	                    if (l instanceof Number && r instanceof Number) {
+	                        // int ^ int
+	                        if (l instanceof Integer li && r instanceof Integer ri) {
+	                            int base = li, exp = ri;
+	                            if (exp >= 0) {
+	                                long acc = 1, b = base; int e = exp;
+	                                while (e > 0) { if ((e & 1)==1) acc *= b; b *= b; e >>= 1; }
+	                                return new ir.tac.Literal((int)acc);
+	                            } else {
+	                                // negative exponent -> float result
+	                                return new ir.tac.Literal((float)Math.pow(base, exp));
+	                            }
+	                        }
+	                        // any float involved -> float result
+	                        double a = ((Number)l).doubleValue();
+	                        double b = ((Number)r).doubleValue();
+	                        return new ir.tac.Literal((float)Math.pow(a, b));
+	                    }
+	                    break;
 	                case "cmpeq": return new ir.tac.Literal(java.util.Objects.equals(l, r));
 	                case "cmpne": return new ir.tac.Literal(!java.util.Objects.equals(l, r));
 	                case "cmplt": if (l instanceof Comparable cl && r instanceof Comparable cr) return new ir.tac.Literal(cl.compareTo(cr) < 0);
@@ -870,6 +899,29 @@ public class Compiler {
 	            }
 	        } catch (Throwable ignore) {}
 	        return null;
+	    }
+	    
+	    private static boolean zero(ir.tac.Literal l){
+	        Object v = l.value();
+	        return (v instanceof Integer && ((Integer)v)==0)
+	            || (v instanceof Float   && ((Float)v)==0.0f);
+	    }
+	    private static boolean one(ir.tac.Literal l){
+	        Object v = l.value();
+	        return (v instanceof Integer && ((Integer)v)==1)
+	            || (v instanceof Float   && ((Float)v)==1.0f);
+	    }
+	    private static boolean isNumber(ir.tac.Literal l, double x){
+	        Object v = l.value();
+	        return (v instanceof Integer && ((Integer)v)==(int)x)
+	            || (v instanceof Float   && Math.abs(((Float)v)- (float)x) < 1e-7);
+	    }
+	    private static boolean eqVal(ir.tac.Value a, ir.tac.Value b){
+	        if (a==b) return true;
+	        if (a==null || b==null) return false;
+	        if (a instanceof ir.tac.Literal la && b instanceof ir.tac.Literal lb)
+	            return java.util.Objects.equals(la.value(), lb.value());
+	        return a.toString().equals(b.toString()); // Variable name equality
 	    }
 
 	    private void optimizeBlock(ir.cfg.BasicBlock bb){
@@ -897,6 +949,80 @@ public class Compiler {
 	                    out.add(new ir.tac.Assign(a.id(), a.dest(), L, null){ @Override protected String op(){ return "mov"; }});
 	                    continue;
 	                }
+	                
+	                if ("add".equals(op)) {
+	                    // x + 0 -> x   |   0 + x -> x
+	                    if (R instanceof ir.tac.Literal lr && zero(lr)) {
+	                        out.add(new ir.tac.Assign(a.id(), a.dest(), L, null){ @Override protected String op(){ return "mov"; }});
+	                        env.put(a.dest().toString(), L); continue;
+	                    }
+	                    if (L instanceof ir.tac.Literal ll && zero(ll)) {
+	                        out.add(new ir.tac.Assign(a.id(), a.dest(), R, null){ @Override protected String op(){ return "mov"; }});
+	                        env.put(a.dest().toString(), R); continue;
+	                    }
+	                }
+	                if ("sub".equals(op)) {
+	                    // x - 0 -> x
+	                    if (R instanceof ir.tac.Literal lr && zero(lr)) {
+	                        out.add(new ir.tac.Assign(a.id(), a.dest(), L, null){ @Override protected String op(){ return "mov"; }});
+	                        env.put(a.dest().toString(), L); continue;
+	                    }
+	                    // x - x -> 0
+	                    if (eqVal(L,R)) {
+	                        out.add(new ir.tac.Assign(a.id(), a.dest(), new ir.tac.Literal(0), null){ @Override protected String op(){ return "mov"; }});
+	                        env.put(a.dest().toString(), new ir.tac.Literal(0)); continue;
+	                    }
+	                }
+	                if ("mul".equals(op)) {
+	                    // x * 1 -> x   |   1 * x -> x
+	                    if (R instanceof ir.tac.Literal lr && one(lr)) {
+	                        out.add(new ir.tac.Assign(a.id(), a.dest(), L, null){ @Override protected String op(){ return "mov"; }});
+	                        env.put(a.dest().toString(), L); continue;
+	                    }
+	                    if (L instanceof ir.tac.Literal ll && one(ll)) {
+	                        out.add(new ir.tac.Assign(a.id(), a.dest(), R, null){ @Override protected String op(){ return "mov"; }});
+	                        env.put(a.dest().toString(), R); continue;
+	                    }
+	                    // x * 0 -> 0   |   0 * x -> 0
+	                    if ((R instanceof ir.tac.Literal lr0 && zero(lr0)) || (L instanceof ir.tac.Literal ll0 && zero(ll0))) {
+	                        out.add(new ir.tac.Assign(a.id(), a.dest(), new ir.tac.Literal(0), null){ @Override protected String op(){ return "mov"; }});
+	                        env.put(a.dest().toString(), new ir.tac.Literal(0)); continue;
+	                    }
+	                }
+	                if ("div".equals(op)) {
+	                    // x / 1 -> x
+	                    if (R instanceof ir.tac.Literal lr && one(lr)) {
+	                        out.add(new ir.tac.Assign(a.id(), a.dest(), L, null){ @Override protected String op(){ return "mov"; }});
+	                        env.put(a.dest().toString(), L); continue;
+	                    }
+	                    // 0 / x -> 0 (x != 0 unknown at compile time -> still safe to fold 0/x to 0)
+	                    if (L instanceof ir.tac.Literal ll0 && zero(ll0)) {
+	                        out.add(new ir.tac.Assign(a.id(), a.dest(), new ir.tac.Literal(0), null){ @Override protected String op(){ return "mov"; }});
+	                        env.put(a.dest().toString(), new ir.tac.Literal(0)); continue;
+	                    }
+	                    // self-division x / x -> 1  (avoid 0/0 by being conservative: only when L==R and not literal 0)
+	                    if (eqVal(L,R) && !(L instanceof ir.tac.Literal zl && zero(zl))) {
+	                        out.add(new ir.tac.Assign(a.id(), a.dest(), new ir.tac.Literal(1), null){ @Override protected String op(){ return "mov"; }});
+	                        env.put(a.dest().toString(), new ir.tac.Literal(1)); continue;
+	                    }
+	                }
+	                if ("pow".equals(op)) {
+	                    // x ^ 1 -> x
+	                    if (R instanceof ir.tac.Literal lr && isNumber(lr, 1.0)) {
+	                        out.add(new ir.tac.Assign(a.id(), a.dest(), L, null){ @Override protected String op(){ return "mov"; }});
+	                        env.put(a.dest().toString(), L); continue;
+	                    }
+	                    // x ^ 0 -> 1
+	                    if (R instanceof ir.tac.Literal lr0 && isNumber(lr0, 0.0)) {
+	                        out.add(new ir.tac.Assign(a.id(), a.dest(), new ir.tac.Literal(1), null){ @Override protected String op(){ return "mov"; }});
+	                        env.put(a.dest().toString(), new ir.tac.Literal(1)); continue;
+	                    }
+	                    // 1 ^ y -> 1
+	                    if (L instanceof ir.tac.Literal ll1 && isNumber(ll1, 1.0)) {
+	                        out.add(new ir.tac.Assign(a.id(), a.dest(), new ir.tac.Literal(1), null){ @Override protected String op(){ return "mov"; }});
+	                        env.put(a.dest().toString(), new ir.tac.Literal(1)); continue;
+	                    }
+	                }	
 
 	                // constant fold
 	                ir.tac.Value cf = tryFold(op, L, R);
@@ -938,23 +1064,38 @@ public class Compiler {
 	        // ------- backward pass: DCE -------
 	        java.util.Set<String> live = new java.util.HashSet<>();
 	        java.util.List<ir.tac.TAC> pruned = new java.util.ArrayList<>();
+
 	        for (int i = out.size()-1; i>=0; --i){
 	            ir.tac.TAC t = out.get(i);
+
 	            if (t instanceof ir.tac.Assign a){
-	                String op = a.opcode();
-	                // add uses
-	                if (a.left() instanceof ir.tac.Variable v) live.add(v.toString());
-	                if (a.right()!=null && a.right() instanceof ir.tac.Variable v2) live.add(v2.toString());
+	                String op  = a.opcode();
+	                String def = (a.dest()==null) ? null : a.dest().toString();
 
 	                boolean essential = "label".equals(op) || "test".equals(op) || "ret".equals(op);
-	                String def = (a.dest()==null)? null : a.dest().toString();
-	                if (!essential && def != null && !live.contains(def)){
-	                    // dead store - skip
-	                    continue;
+	                boolean keep = essential || (def != null && live.contains(def));
+
+	                if (keep) {
+	                    // add uses (only for kept instructions)
+	                    if (a.left()  instanceof ir.tac.Variable v)  live.add(v.toString());
+	                    if (a.right() instanceof ir.tac.Variable v2) live.add(v2.toString());
+	                    if (def != null) live.remove(def); // def is satisfied
+	                    pruned.add(0, t);
 	                }
-	                if (def != null) live.remove(def);
+	                // else: drop it (do NOT add uses)
+	            }
+
+	            else if (t instanceof ir.tac.Call c) {
+	                // mark call arguments live and always keep calls
+	                java.util.List<ir.tac.Value> args = c.args();
+	                if (args != null) {
+	                    for (ir.tac.Value v : args)
+	                        if (v instanceof ir.tac.Variable var) live.add(var.toString());
+	                }
 	                pruned.add(0, t);
-	            } else {
+	            }
+
+	            else {
 	                pruned.add(0, t);
 	            }
 	        }
@@ -963,6 +1104,65 @@ public class Compiler {
 	        bb.instructions().addAll(pruned);
 	    }
 	}
+	
+	
+	private static void removeOrphanFunctions(List<BasicBlock> blocks) {
+	    if (blocks == null || blocks.isEmpty()) return;
+
+	    // Map: function name -> entry block (block that starts with a "label")
+	    Map<String, BasicBlock> funcEntry = new HashMap<>();
+	    for (BasicBlock b : blocks) {
+	        List<ir.tac.TAC> ins = b.instructions();
+	        if (ins == null || ins.isEmpty()) continue;
+	        ir.tac.TAC first = ins.get(0);
+	        if (first instanceof ir.tac.Assign a && "label".equals(a.opcode())) {
+	            String s = a.toString();                 // "<name>"
+	            String name = (s.startsWith("<") && s.endsWith(">")) ? s.substring(1, s.length()-1) : s;
+	            funcEntry.put(name, b);
+	        }
+	    }
+
+	    // Worklist starting from main’s first block
+	    Set<BasicBlock> keepBlocks = new HashSet<>();
+	    ArrayDeque<BasicBlock> q = new ArrayDeque<>();
+	    if (!blocks.isEmpty()) {
+	        keepBlocks.add(blocks.get(0));      // main’s first (unlabeled) block
+	        q.add(blocks.get(0));
+	    }
+
+	    // helper to filter built-ins
+	    java.util.function.Predicate<String> isBuiltin =
+	        n -> n != null && (n.startsWith("print") || n.startsWith("read") || "println".equals(n));
+
+	    Set<String> seenFuncs = new HashSet<>();
+
+	    while (!q.isEmpty()) {
+	        BasicBlock b = q.removeFirst();
+
+	        // Follow CFG edges
+	        List<BasicBlock> succs = b.succs();
+	        if (succs != null) {
+	            for (BasicBlock s : succs) if (keepBlocks.add(s)) q.add(s);
+	        }
+
+	        // Follow call edges to function entry blocks
+	        for (ir.tac.TAC t : b.instructions()) {
+	            if (t instanceof ir.tac.Call c) {
+	                mocha.Symbol f = c.function();           // <-- use function(), not sym()
+	                if (f == null) continue;
+	                String callee = f.name();
+	                if (isBuiltin.test(callee)) continue;    // ignore built-ins
+	                BasicBlock entry = funcEntry.get(callee);
+	                if (entry != null && seenFuncs.add(callee) && keepBlocks.add(entry)) {
+	                    q.add(entry);
+	                }
+	            }
+	        }
+	    }
+
+	    // Drop everything not reachable from main or a transitive callee
+	    blocks.removeIf(b -> !keepBlocks.contains(b));
+	}
     
     
     
@@ -970,20 +1170,24 @@ public class Compiler {
     public IR genIR(ast.AST ast) {
     	IRBuilder builder = new IRBuilder();   // owns its own block list and starts with bb1
 
-        if (ast != null && ast.getRoot() != null) {
-            // functions first (if any)
-            for (AST.Declaration d : ast.getRoot().functions()) {
-                if (d instanceof AST.FunctionDeclaration fd) {
-                    fd.accept(builder); // IRBuilder.visit(FunctionDeclaration)
-                }
-            }
-            // main body
-            ast.getRoot().mainStatementSequence().accept(builder);
-        }
+    	if (ast != null && ast.getRoot() != null) {
+    	    for (AST.Declaration d : ast.getRoot().functions()) {
+    	        if (d instanceof AST.FunctionDeclaration fd) {
+    	            fd.accept(builder);
+    	        }
+    	    }
+
+    	    builder.resetToMain();
+
+    	    ast.getRoot().mainStatementSequence().accept(builder);
+    	}
 
         currentIR = new IR(builder.getBlocks());
         new Optimizer().optimize(currentIR.blocks());
         CFGSimplifier.simplify(currentIR.blocks());
+        removeOrphanFunctions(currentIR.blocks());
+        new Optimizer().optimize(currentIR.blocks());
+        mergeTrivialEmpties(currentIR.blocks());
 	    return currentIR;
     }
     
@@ -1035,7 +1239,7 @@ public class Compiler {
     	      if (pk != null) pk.remove(bb);
 
     	      // (optional) remove the final 'test' TAC:
-    	      // ins.remove(ins.size() - 1);
+    	      ins.remove(ins.size() - 1);
     	    }
 
     	    // ---- 2) Reachability from ALL true roots (function entries + first block) ----
@@ -1067,8 +1271,38 @@ public class Compiler {
     	    // ---- 3) Drop unreachable blocks ----
     	    blocks.removeIf(b -> !visited.contains(b));
 
-    	  }
     	}
+    }
+    
+    private static void mergeTrivialEmpties(List<BasicBlock> blocks){
+    	  boolean changed;
+    	  do {
+    	    changed = false;
+    	    for (int i = 0; i < blocks.size(); i++){
+    	      BasicBlock b = blocks.get(i);
+    	      List<ir.tac.TAC> ins = b.instructions();
+    	      List<BasicBlock> succs = b.succs(), preds = b.preds();
+    	      if (ins.isEmpty() && succs != null && succs.size()==1){
+    	        BasicBlock s = succs.get(0);
+    	        // redirect all preds of b to s
+    	        if (preds != null) {
+    	          for (BasicBlock p : new ArrayList<>(preds)) {
+    	            List<BasicBlock> ps = p.succs();
+    	            for (int k = 0; k < ps.size(); k++) if (ps.get(k) == b) ps.set(k, s);
+    	            s.preds().add(p);
+    	          }
+    	        }
+    	        // drop edge b->s and remove b from s.preds
+    	        s.preds().remove(b);
+    	        succs.clear();
+    	        // remove b
+    	        blocks.remove(i--);
+    	        changed = true;
+    	      }
+    	    }
+    	  } while (changed);
+    	}
+ 
     
     private static class NodeVisitorAdapter implements ast.NodeVisitor {
         // literals / ids
@@ -1125,6 +1359,9 @@ public class Compiler {
         IRBuilder() { cur = newBB(); }
 
         List<BasicBlock> getBlocks() { return blocks; }
+        
+        BasicBlock mainEntry() { return blocks.get(0); }
+        void resetToMain() { this.cur = mainEntry(); }
 
         private BasicBlock newBB() {
             BasicBlock b = new BasicBlock(blocks.size() + 1);
@@ -1138,23 +1375,81 @@ public class Compiler {
 
         /** Lower an expression to a Value (using temps & TAC when needed). */
         private Value val(ast.Expression e) {
-            if (e instanceof AST.IntegerLiteral il) return new Literal(il.getValue());
+        	if (e instanceof AST.IntegerLiteral il) return new Literal(il.getValue());
             if (e instanceof AST.FloatLiteral   fl) return new Literal(fl.getValue());
             if (e instanceof AST.BoolLiteral    bl) return new Literal(bl.getValue());
             if (e instanceof AST.Identifier     id) return v(id.getName());
 
+            // ----- arithmetic binary ops -----
             if (e instanceof AST.Addition add) {
                 Value L = val(add.getLeft()), R = val(add.getRight());
                 Variable t = newTmp();
-                cur.addInstruction(new Add(newId(), t, L, R));
+                cur.addInstruction(new Add(newId(), t, L, R)); // concrete Add TAC class you already have
+                return t;
+            }
+            if (e instanceof AST.Subtraction sub) {
+                Value L = val(sub.getLeft()), R = val(sub.getRight());
+                Variable t = newTmp();
+                cur.addInstruction(new Assign(newId(), t, L, R){ @Override protected String op(){ return "sub"; }});
                 return t;
             }
             if (e instanceof AST.Multiplication mul) {
                 Value L = val(mul.getLeft()), R = val(mul.getRight());
                 Variable t = newTmp();
-                cur.addInstruction(new Assign(newId(), t, L, R) { @Override protected String op(){ return "mul"; }});
+                cur.addInstruction(new Assign(newId(), t, L, R){ @Override protected String op(){ return "mul"; }});
                 return t;
             }
+            if (e instanceof AST.Division div) {
+                Value L = val(div.getLeft()), R = val(div.getRight());
+                Variable t = newTmp();
+                cur.addInstruction(new Assign(newId(), t, L, R){ @Override protected String op(){ return "div"; }});
+                return t;
+            }
+            if (e instanceof AST.Modulo mod) {
+                Value L = val(mod.getLeft()), R = val(mod.getRight());
+                Variable t = newTmp();
+                cur.addInstruction(new Assign(newId(), t, L, R){ @Override protected String op(){ return "mod"; }});
+                return t;
+            }
+
+            // ----- power (^) -----
+            if (e instanceof AST.Power pow) {
+                Value L = val(pow.getBase()), R = val(pow.getExponent());
+                Variable t = newTmp();
+                cur.addInstruction(new Assign(newId(), t, L, R){ @Override protected String op(){ return "pow"; }});
+                return t;
+            }
+
+            // ----- unary minus -----
+            if (e instanceof AST.UnaryMinus um) {
+                Value R = val(um.getExpr());
+                Variable t = newTmp();
+                // encode -x as (0 - x)
+                cur.addInstruction(new Assign(newId(), t, new Literal(0), R){ @Override protected String op(){ return "sub"; }});
+                return t;
+            }
+
+            // ----- logical not / and / or (non–short-circuit; fine for IR & folding) -----
+            if (e instanceof AST.LogicalNot ln) {
+                Value R = val(ln.getExpression());
+                Variable t = newTmp();
+                cur.addInstruction(new Assign(newId(), t, R, null){ @Override protected String op(){ return "not"; }});
+                return t;
+            }
+            if (e instanceof AST.LogicalAnd la) {
+                Value L = val(la.getLeft()), R = val(la.getRight());
+                Variable t = newTmp();
+                cur.addInstruction(new Assign(newId(), t, L, R){ @Override protected String op(){ return "and"; }});
+                return t;
+            }
+            if (e instanceof AST.LogicalOr lo) {
+                Value L = val(lo.getLeft()), R = val(lo.getRight());
+                Variable t = newTmp();
+                cur.addInstruction(new Assign(newId(), t, L, R){ @Override protected String op(){ return "or"; }});
+                return t;
+            }
+            
+            // Relations
             if (e instanceof AST.Relation rel) {
                 Value L = val(rel.getLeft()), R = val(rel.getRight());
                 Variable t = newTmp();
@@ -1167,6 +1462,8 @@ public class Compiler {
                 cur.addInstruction(new Assign(newId(), t, L, R){ @Override protected String op(){ return op; }});
                 return t;
             }
+            
+            // Function call
             if (e instanceof AST.FunctionCall fc) {
                 java.util.ArrayList<Value> args = new java.util.ArrayList<>();
                 for (ast.Expression a : fc.getArguments().getArguments()) args.add(val(a));
@@ -1179,11 +1476,6 @@ public class Compiler {
         }
 
         // --------------------- statements ---------------------
-
-        @Override
-        public void visit(AST.StatementSequence node) {
-            for (ast.Statement s : node) if (s != null) s.accept(this);
-        }
 
         @Override
         public void visit(AST.Assignment node) {
@@ -1238,6 +1530,69 @@ public class Compiler {
             // continue at join
             cur = joinBB;
         }
+        
+        @Override
+        public void visit(AST.WhileStatement n) {
+            // Create the three blocks: test, body, and exit
+            BasicBlock testBB = newBB();
+            BasicBlock bodyBB = newBB();
+            BasicBlock exitBB = newBB();
+
+            // Edge from current block into the loop test
+            cur.addSuccessor(testBB);
+
+            // --- testBB: evaluate condition and branch ---
+            cur = testBB;
+            final Value cond = val(n.getCondition());
+            cur.addInstruction(new Assign(newId(), newTmp(), cond, null) {
+                @Override protected String op(){ return "test"; }
+                @Override public String toString(){
+                    return "if " + cond + " goto " + bodyBB.dotNodeName() + " else " + exitBB.dotNodeName();
+                }
+            });
+            cur.addSuccessor(bodyBB);  // true branch
+            cur.addSuccessor(exitBB);  // false branch
+
+            // --- bodyBB: loop body, then jump back to testBB ---
+            cur = bodyBB;
+            n.getBody().accept(this);
+            cur.addSuccessor(testBB);  // back-edge
+
+            // Continue after the loop at exitBB
+            cur = exitBB;
+        }
+        
+        @Override
+        public void visit(AST.RepeatStatement n) {
+            // blocks: body -> testJoin ; testJoin branches to body or exit
+            BasicBlock bodyBB = newBB();
+            BasicBlock testBB = newBB();
+            BasicBlock exitBB = newBB();
+
+            // current block falls into body
+            cur.addSuccessor(bodyBB);
+
+            // --- body ---
+            cur = bodyBB;
+            n.getBody().accept(this);
+            cur.addSuccessor(testBB);
+
+            // --- test (UNTIL cond) ---
+            cur = testBB;
+            final Value cond = val(n.getCondition());
+            cur.addInstruction(new Assign(newId(), newTmp(), cond, null) {
+                @Override protected String op(){ return "test"; }
+                @Override public String toString(){
+                    // repeat ... until cond  ==  loop until cond is true (i.e., exit on true)
+                    return "if " + cond + " goto " + exitBB.dotNodeName() + " else " + bodyBB.dotNodeName();
+                }
+            });
+            cur.addSuccessor(exitBB);  // cond true -> exit
+            cur.addSuccessor(bodyBB);  // cond false -> repeat
+
+            // continue after loop
+            cur = exitBB;
+        }
 
         @Override
         public void visit(AST.ReturnStatement n) {
@@ -1252,19 +1607,54 @@ public class Compiler {
 
         @Override
         public void visit(AST.FunctionDeclaration n) {
-            // start a fresh block for each function; add a visible label line
             cur = newBB();
             cur.addInstruction(new Assign(newId(), newTmp(), null, null) {
                 @Override protected String op(){ return "label"; }
                 @Override public String toString(){ return "<" + n.getIdentifier().getName() + ">"; }
             });
+
+            // parameters are considered initialized
+            enterInitScope();
+            for (AST.FormalParameter p : n.getParameters()){
+                setInit(p.getIdentifier().getName());
+            }
+
             n.getBody().getStatements().accept(this);
+            exitInitScope();
         }
+        
+        @Override
+        public void visit(AST.StatementSequence node) {
+            boolean root = initStack.isEmpty();
+            if (root) enterInitScope();
+            for (ast.Statement s : node) if (s != null) s.accept(this);
+            if (root) exitInitScope();
+        }
+        
+        @Override
+        public void visit(AST.VariableDeclaration n) {
+            String name = n.getIdentifier().getName();
+            types.Type t = ((AST.TypeNode) n.getTypeNode()).getActualType();
+            ir.tac.Literal def = null;
+            if (t instanceof types.IntType)      def = new ir.tac.Literal(0);
+            else if (t instanceof types.FloatType) def = new ir.tac.Literal(0.0f);
+            else if (t instanceof types.BoolType)  def = new ir.tac.Literal(false);
+
+            if (def != null) {
+                Variable v = v(name);
+                cur.addInstruction(new Assign(newId(), v, def, null){ @Override protected String op(){ return "mov"; }});
+            }
+            setInit(name);
+        }
+        
+        // ---- init tracking (scoped set of initialized variables)
+        private final java.util.Deque<java.util.Set<String>> initStack = new java.util.ArrayDeque<>();
+        private void enterInitScope(){ initStack.push(new java.util.HashSet<>()); }
+        private void exitInitScope(){ initStack.pop(); }
+        private boolean isInit(String n){ for (var s: initStack) if (s.contains(n)) return true; return false; }
+        private void setInit(String n){ if (!initStack.isEmpty()) initStack.peek().add(n); }
 
         // no-ops for everything else
-        @Override public void visit(AST.VariableDeclaration n) {}
-        @Override public void visit(AST.WhileStatement n) {}
-        @Override public void visit(AST.RepeatStatement n) {}
         @Override public void visit(AST.LogicalAnd n) {}
         @Override public void visit(AST.LogicalOr n) {}
         @Override public void visit(AST.LogicalNot n) {}
