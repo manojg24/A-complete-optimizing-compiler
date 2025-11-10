@@ -1164,7 +1164,11 @@ public class Compiler {
 	    blocks.removeIf(b -> !keepBlocks.contains(b));
 	}
     
-    
+	private String lastPreDot = null;
+	private String lastPostDot = null;
+
+	public String getPreDot()  { return lastPreDot; }
+	public String getPostDot() { return lastPostDot; }
     
 
     public IR genIR(ast.AST ast) {
@@ -1183,11 +1187,17 @@ public class Compiler {
     	}
 
         currentIR = new IR(builder.getBlocks());
-        new Optimizer().optimize(currentIR.blocks());
-        CFGSimplifier.simplify(currentIR.blocks());
-        removeOrphanFunctions(currentIR.blocks());
-        new Optimizer().optimize(currentIR.blocks());
-        mergeTrivialEmpties(currentIR.blocks());
+        
+        lastPreDot = currentIR.asDotGraph(); // Before Optimization
+        
+//        new Optimizer().optimize(currentIR.blocks());
+//        CFGSimplifier.simplify(currentIR.blocks());
+//        removeOrphanFunctions(currentIR.blocks());
+//        new Optimizer().optimize(currentIR.blocks());
+//        mergeTrivialEmpties(currentIR.blocks());
+//        
+//        lastPostDot = currentIR.asDotGraph(); // After Optimization
+        
 	    return currentIR;
     }
     
@@ -1683,8 +1693,54 @@ public class Compiler {
         if (currentIR == null) currentIR = genIR(this.astRoot); // safety
 
         // TODO: apply passes in `opts` (e.g., "dce"), and loop to convergence if requested.
+        
+        List<String> plan;
+        if (max || opts == null || opts.isEmpty()) {
+            // "max" pipeline (feel free to reorder if you want)
+            plan = Arrays.asList("cp","cf","cse","dce","cfg","ofe","merge");
+        } else {
+            plan = new ArrayList<>(opts);
+        }
+
+        // Run once or to convergence depending on 'loop'
+        String prev;
+        do {
+            prev = currentIR.asDotGraph();
+
+            for (String p : plan) {
+                switch (p.toLowerCase()) {
+                    case "cp":    // constant propagation (in your Optimizer forward pass)
+                    case "cf":    // constant folding      (in your Optimizer)
+                    case "cse":   // common subexpr elim   (in your Optimizer)
+                    case "dce":   // dead code elim        (in your backward pass)
+                        new Optimizer().optimize(currentIR.blocks());
+                        break;
+
+                    case "cfg":   // branch folding + unreachable BBs
+                        CFGSimplifier.simplify(currentIR.blocks());
+                        break;
+
+                    case "ofe":   // orphan function elimination (call graph prune)
+                        removeOrphanFunctions(currentIR.blocks());
+                        break;
+
+                    case "merge": // merge trivial empty blocks
+                        mergeTrivialEmpties(currentIR.blocks());
+                        break;
+
+                    default:
+                        // unknown pass name -> ignore
+                        break;
+                }
+            }
+            // Keep looping while the DOT changes and 'loop' is requested
+        } while (loop && !currentIR.asDotGraph().equals(prev));
+
+        lastPostDot = currentIR.asDotGraph();
+        return lastPostDot;
+        
         // For now, no-ops — just return the graph of currentIR.
-        return currentIR.asDotGraph();
+        //return currentIR.asDotGraph();
     }
     
  // ---------- Minimal interpreter for the I/O test ----------
