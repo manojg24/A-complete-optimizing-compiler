@@ -821,313 +821,230 @@ public class Compiler {
     
     
     
-	// --------------------- Local IR Optimizer ---------------------
-	class Optimizer {
+ // --------------------- Local IR Optimizer ---------------------
+    class Optimizer {
 
-	    public List<ir.cfg.BasicBlock> optimize(List<ir.cfg.BasicBlock> blocks){
-	        for (ir.cfg.BasicBlock bb : blocks) optimizeBlock(bb);
-	        return blocks;
-	    }
+        private boolean isPure(String op){
+            if (op == null) return false;
+            return switch (op) {
+                case "add","sub","mul","div","mod","pow",
+                     "cmpeq","cmpne","cmplt","cmple","cmpgt","cmpge","mov" -> true;
+                default -> false;
+            };
+        }
 
-	    private boolean isPure(String op){
-	        if (op == null) return false;
-	        return switch (op) {
-	            case "add","sub","mul","div","mod","pow",
-	                 "cmpeq","cmpne","cmplt","cmple","cmpgt","cmpge","mov" -> true;
-	            default -> false;
-	        };
-	    }
+        private String keyOf(ir.tac.Value v){
+            if (v == null) return "_";
+            if (v instanceof ir.tac.Literal l) return "K:"+String.valueOf(l.value());
+            return "V:"+v.toString();
+        }
 
-	    private String keyOf(ir.tac.Value v){
-	        if (v == null) return "_";
-	        if (v instanceof ir.tac.Literal l) return "K:"+String.valueOf(l.value());
-	        return "V:"+v.toString();
-	    }
+        private ir.tac.Value tryFold(String op, ir.tac.Value L, ir.tac.Value R){
+            if (!(L instanceof ir.tac.Literal) || (R != null && !(R instanceof ir.tac.Literal))) return null;
+            Object l = ((ir.tac.Literal)L).value();
+            Object r = (R==null) ? null : ((ir.tac.Literal)R).value();
+            try {
+                switch (op) {
+                    case "mov":   return L;
+                    case "add":
+                        if (l instanceof Integer i && r instanceof Integer j) return new ir.tac.Literal(i+j);
+                        if (l instanceof Float   i && r instanceof Float   j) return new ir.tac.Literal(i+j);
+                        break;
+                    case "sub":
+                        if (l instanceof Integer i && r instanceof Integer j) return new ir.tac.Literal(i-j);
+                        if (l instanceof Float   i && r instanceof Float   j) return new ir.tac.Literal(i-j);
+                        break;
+                    case "mul":
+                        if (l instanceof Integer i && r instanceof Integer j) return new ir.tac.Literal(i*j);
+                        if (l instanceof Float   i && r instanceof Float   j) return new ir.tac.Literal(i*j);
+                        break;
+                    case "div":
+                        if (l instanceof Integer i && r instanceof Integer j) return new ir.tac.Literal(i/j);
+                        if (l instanceof Float   i && r instanceof Float   j) return new ir.tac.Literal(i/j);
+                        break;
+                    case "pow":
+                        if (l instanceof Number && r instanceof Number) {
+                            if (l instanceof Integer li && r instanceof Integer ri) {
+                                int base = li, exp = ri;
+                                if (exp >= 0) {
+                                    long acc = 1, b = base; int e = exp;
+                                    while (e > 0) { if ((e & 1)==1) acc *= b; b *= b; e >>= 1; }
+                                    return new ir.tac.Literal((int)acc);
+                                } else {
+                                    return new ir.tac.Literal((float)Math.pow(base, exp));
+                                }
+                            }
+                            double a = ((Number)l).doubleValue();
+                            double b = ((Number)r).doubleValue();
+                            return new ir.tac.Literal((float)Math.pow(a, b));
+                        }
+                        break;
+                    case "cmpeq": return new ir.tac.Literal(java.util.Objects.equals(l, r));
+                    case "cmpne": return new ir.tac.Literal(!java.util.Objects.equals(l, r));
+                    case "cmplt":
+                        if (l instanceof Comparable cl && r instanceof Comparable cr)
+                            return new ir.tac.Literal(cl.compareTo(cr) < 0);
+                        break;
+                    case "cmple":
+                        if (l instanceof Comparable cl && r instanceof Comparable cr)
+                            return new ir.tac.Literal(cl.compareTo(cr) <= 0);
+                        break;
+                    case "cmpgt":
+                        if (l instanceof Comparable cl && r instanceof Comparable cr)
+                            return new ir.tac.Literal(cl.compareTo(cr) > 0);
+                        break;
+                    case "cmpge":
+                        if (l instanceof Comparable cl && r instanceof Comparable cr)
+                            return new ir.tac.Literal(cl.compareTo(cr) >= 0);
+                        break;
+                }
+            } catch (Throwable ignore) {}
+            return null;
+        }
 
-	    private ir.tac.Assign newAssignLike(ir.tac.Assign a, ir.tac.Variable d, ir.tac.Value L, ir.tac.Value R){
-	        return prettyAssign(a.id(), d, a.opcode(), L, R);
-	    }
+        // Follow env mappings transitively: x -> y -> 0
+        private ir.tac.Value resolve(ir.tac.Value v, Map<String, ir.tac.Value> env) {
+            while (v instanceof ir.tac.Variable && env.containsKey(v.toString())) {
+                v = env.get(v.toString());
+            }
+            return v;
+        }
 
-	    private ir.tac.Value tryFold(String op, ir.tac.Value L, ir.tac.Value R){
-	        if (!(L instanceof ir.tac.Literal) || (R != null && !(R instanceof ir.tac.Literal))) return null;
-	        Object l = ((ir.tac.Literal)L).value();
-	        Object r = (R==null) ? null : ((ir.tac.Literal)R).value();
-	        try {
-	            switch (op) {
-	                case "mov":   return L;
-	                case "add":   if (l instanceof Integer i && r instanceof Integer j) return new ir.tac.Literal(i+j);
-	                              if (l instanceof Float   i && r instanceof Float   j) return new ir.tac.Literal(i+j); break;
-	                case "sub":   if (l instanceof Integer i && r instanceof Integer j) return new ir.tac.Literal(i-j);
-	                              if (l instanceof Float   i && r instanceof Float   j) return new ir.tac.Literal(i-j); break;
-	                case "mul":   if (l instanceof Integer i && r instanceof Integer j) return new ir.tac.Literal(i*j);
-	                              if (l instanceof Float   i && r instanceof Float   j) return new ir.tac.Literal(i*j); break;
-	                case "div":   if (l instanceof Integer i && r instanceof Integer j) return new ir.tac.Literal(i/j);
-	                              if (l instanceof Float   i && r instanceof Float   j) return new ir.tac.Literal(i/j); break;
-	                case "pow":
-	                    if (l instanceof Number && r instanceof Number) {
-	                        // int ^ int
-	                        if (l instanceof Integer li && r instanceof Integer ri) {
-	                            int base = li, exp = ri;
-	                            if (exp >= 0) {
-	                                long acc = 1, b = base; int e = exp;
-	                                while (e > 0) { if ((e & 1)==1) acc *= b; b *= b; e >>= 1; }
-	                                return new ir.tac.Literal((int)acc);
-	                            } else {
-	                                // negative exponent -> float result
-	                                return new ir.tac.Literal((float)Math.pow(base, exp));
-	                            }
-	                        }
-	                        // any float involved -> float result
-	                        double a = ((Number)l).doubleValue();
-	                        double b = ((Number)r).doubleValue();
-	                        return new ir.tac.Literal((float)Math.pow(a, b));
-	                    }
-	                    break;
-	                case "cmpeq": return new ir.tac.Literal(java.util.Objects.equals(l, r));
-	                case "cmpne": return new ir.tac.Literal(!java.util.Objects.equals(l, r));
-	                case "cmplt": if (l instanceof Comparable cl && r instanceof Comparable cr) return new ir.tac.Literal(cl.compareTo(cr) < 0);
-	                               break;
-	                case "cmple": if (l instanceof Comparable cl && r instanceof Comparable cr) return new ir.tac.Literal(cl.compareTo(cr) <= 0);
-	                               break;
-	                case "cmpgt": if (l instanceof Comparable cl && r instanceof Comparable cr) return new ir.tac.Literal(cl.compareTo(cr) > 0);
-	                               break;
-	                case "cmpge": if (l instanceof Comparable cl && r instanceof Comparable cr) return new ir.tac.Literal(cl.compareTo(cr) >= 0);
-	                               break;
-	            }
-	        } catch (Throwable ignore) {}
-	        return null;
-	    }
-	    
-	    private static boolean zero(ir.tac.Literal l){
-	        Object v = l.value();
-	        return (v instanceof Integer && ((Integer)v)==0)
-	            || (v instanceof Float   && ((Float)v)==0.0f);
-	    }
-	    private static boolean one(ir.tac.Literal l){
-	        Object v = l.value();
-	        return (v instanceof Integer && ((Integer)v)==1)
-	            || (v instanceof Float   && ((Float)v)==1.0f);
-	    }
-	    private static boolean isNumber(ir.tac.Literal l, double x){
-	        Object v = l.value();
-	        return (v instanceof Integer && ((Integer)v)==(int)x)
-	            || (v instanceof Float   && Math.abs(((Float)v)- (float)x) < 1e-7);
-	    }
-	    private static boolean eqVal(ir.tac.Value a, ir.tac.Value b){
-	        if (a==b) return true;
-	        if (a==null || b==null) return false;
-	        if (a instanceof ir.tac.Literal la && b instanceof ir.tac.Literal lb)
-	            return java.util.Objects.equals(la.value(), lb.value());
-	        return a.toString().equals(b.toString()); // Variable name equality
-	    }
+        private final boolean doCP, doCF, doCSE, doDCE;
+        Optimizer(boolean cp, boolean cf, boolean cse, boolean dce) {
+            this.doCP = cp; this.doCF = cf; this.doCSE = cse; this.doDCE = dce;
+        }
 
-	    private void optimizeBlock(ir.cfg.BasicBlock bb){
-	        // ------- forward pass: CP/CF/CSE -------
-	        java.util.Map<String, ir.tac.Value> env = new java.util.HashMap<>();
-	        java.util.Map<String, ir.tac.Variable> cse = new java.util.HashMap<>();
-	        java.util.List<ir.tac.TAC> out = new java.util.ArrayList<>();
+        public List<ir.cfg.BasicBlock> optimize(List<ir.cfg.BasicBlock> blocks){
+            for (ir.cfg.BasicBlock bb : blocks) optimizeBlock(bb);
+            return blocks;
+        }
 
-	        for (ir.tac.TAC t : bb) {
-	            if (t instanceof ir.tac.Assign a){
-	                String op = a.opcode();
+        private void optimizeBlock(ir.cfg.BasicBlock bb){
+            Map<String, ir.tac.Value> env = new HashMap<>();
+            Map<String, ir.tac.Variable> cse = new HashMap<>();
+            List<ir.tac.TAC> out = new ArrayList<>();
 
-	                // barriers → clear env/cse, keep as-is
-	                if ("label".equals(op) || "test".equals(op) || "ret".equals(op)) {
-	                    env.clear(); cse.clear(); out.add(t); continue;
-	                }
+            for (ir.tac.TAC t : bb) {
+                if (t instanceof ir.tac.Assign a){
+                    String op = a.opcode();
 
-	                ir.tac.Value L = a.left();
-	                if (L instanceof ir.tac.Variable v && env.containsKey(v.toString())) L = env.get(v.toString());
-	                ir.tac.Value R = a.right();
-	                if (R instanceof ir.tac.Variable v2 && env.containsKey(v2.toString())) R = env.get(v2.toString());
+                    // barriers
+                    if ("label".equals(op) || "test".equals(op) || "ret".equals(op)) {
+                        env.clear(); cse.clear(); out.add(t); continue;
+                    }
 
-	                if ("mov".equals(op)){
-	                    env.put(a.dest().toString(), L);
-	                    out.add(prettyAssign(a.id(), a.dest(), "mov", L, null));
-	                    continue;
-	                }
-	                
-	                if ("add".equals(op)) {
-	                    // x + 0 -> x   |   0 + x -> x
-	                    if (R instanceof ir.tac.Literal lr && zero(lr)) {
-	                    	out.add(prettyAssign(a.id(), a.dest(), "mov", L, null));
-	                        env.put(a.dest().toString(), L); continue;
-	                    }
-	                    if (L instanceof ir.tac.Literal ll && zero(ll)) {
-	                    	out.add(prettyAssign(a.id(), a.dest(), "mov", R, null));
-	                        env.put(a.dest().toString(), R); continue;
-	                    }
-	                }
-	                if ("sub".equals(op)) {
-	                    // x - 0 -> x
-	                    if (R instanceof ir.tac.Literal lr && zero(lr)) {
-	                    	out.add(prettyAssign(a.id(), a.dest(), "mov", L, null));
-	                        env.put(a.dest().toString(), L); continue;
-	                    }
-	                    // x - x -> 0
-	                    if (eqVal(L,R)) {
-	                    	out.add(prettyAssign(a.id(), a.dest(), "mov", new ir.tac.Literal(0), null));
-	                        env.put(a.dest().toString(), new ir.tac.Literal(0));
-	                        continue;
-	                    }
-	                }
-	                if ("mul".equals(op)) {
-	                    // x * 1 -> x   |   1 * x -> x
-	                    if (R instanceof ir.tac.Literal lr && one(lr)) {
-	                    	out.add(prettyAssign(a.id(), a.dest(), "mov", L, null));
-	                        env.put(a.dest().toString(), L); continue;
-	                    }
-	                    if (L instanceof ir.tac.Literal ll && one(ll)) {
-	                    	out.add(prettyAssign(a.id(), a.dest(), "mov", R, null));
-	                        env.put(a.dest().toString(), R); continue;
-	                    }
-	                    // x * 0 -> 0   |   0 * x -> 0
-	                    if ((R instanceof ir.tac.Literal lr0 && zero(lr0)) || (L instanceof ir.tac.Literal ll0 && zero(ll0))) {
-	                    	out.add(prettyAssign(a.id(), a.dest(), "mov", new ir.tac.Literal(0), null));
-	                        env.put(a.dest().toString(), new ir.tac.Literal(0)); continue;
-	                    }
-	                }
-	                if ("div".equals(op)) {
-	                    // x / 1 -> x
-	                    if (R instanceof ir.tac.Literal lr && one(lr)) {
-	                    	out.add(prettyAssign(a.id(), a.dest(), "mov", L, null));
-	                        env.put(a.dest().toString(), L); continue;
-	                    }
-	                    // 0 / x -> 0 (x != 0 unknown at compile time -> still safe to fold 0/x to 0)
-	                    if (L instanceof ir.tac.Literal ll0 && zero(ll0)) {
-	                    	out.add(prettyAssign(a.id(), a.dest(), "mov", new ir.tac.Literal(0), null));
-	                        env.put(a.dest().toString(), new ir.tac.Literal(0));
-	                        continue;
-	                    }
-	                    // self-division x / x -> 1  (avoid 0/0 by being conservative: only when L==R and not literal 0)
-	                    if (eqVal(L,R) && !(L instanceof ir.tac.Literal zl && zero(zl))) {
-	                    	out.add(prettyAssign(a.id(), a.dest(), "mov", new ir.tac.Literal(1), null));
-	                        env.put(a.dest().toString(), new ir.tac.Literal(1));
-	                        continue;
-	                    }
-	                }
-	                if ("pow".equals(op)) {
-	                    // x ^ 1 -> x
-	                    if (R instanceof ir.tac.Literal lr && isNumber(lr, 1.0)) {
-	                    	out.add(prettyAssign(a.id(), a.dest(), "mov", L, null));
-	                        env.put(a.dest().toString(), L); continue;
-	                    }
-	                    // x ^ 0 -> 1
-	                    if (R instanceof ir.tac.Literal lr0 && isNumber(lr0, 0.0)) {
-	                    	out.add(prettyAssign(a.id(), a.dest(), "mov", new ir.tac.Literal(1), null));
-	                        env.put(a.dest().toString(), new ir.tac.Literal(1));
-	                        continue;
-	                    }
-	                    // 1 ^ y -> 1
-	                    if (L instanceof ir.tac.Literal ll1 && isNumber(ll1, 1.0)) {
-	                    	 out.add(prettyAssign(a.id(), a.dest(), "mov", new ir.tac.Literal(1), null));
-	                    	 env.put(a.dest().toString(), new ir.tac.Literal(1));
-	                    	 continue;
-	                    }
-	                }	
+                    ir.tac.Value L = a.left(), R = a.right();
 
-	                // constant fold
-	                ir.tac.Value cf = tryFold(op, L, R);
-	                if (cf != null){
-	                    env.put(a.dest().toString(), cf);
-	                    out.add(prettyAssign(a.id(), a.dest(), "mov", cf, null));
-	                    continue;
-	                }
+                    // ---- CP: substitute operands (transitively)
+                    if (doCP) {
+                        L = resolve(L, env);
+                        R = resolve(R, env);
+                    }
 
-	                // CSE for pure ops with two operands
-	                if (R != null && isPure(op)){
-	                    String key = op + "|" + keyOf(L) + "|" + keyOf(R);
-	                    ir.tac.Variable prev = cse.get(key);
-	                    if (prev != null){
-	                        env.put(a.dest().toString(), prev);
-	                        out.add(prettyAssign(a.id(), a.dest(), "mov", prev, null));
-	                        continue;
-	                    } else {
-	                        cse.put(key, a.dest());
-	                    }
-	                }
+                    // Fast-path for mov with CP
+                    if ("mov".equals(op)) {
+                        if (doCP) {
+                            L = resolve(L, env); // fully resolved
+                            env.put(a.dest().toString(), L);
+                        }
+                        out.add(prettyAssign(a.id(), a.dest(), "mov", L, null));
+                        continue;
+                    }
 
-	                // propagate operands
-	                out.add(newAssignLike(a, a.dest(), L, R));
-	                if ("mov".equals(op) && (L instanceof ir.tac.Literal || L instanceof ir.tac.Variable)){
-	                    env.put(a.dest().toString(), L);
-	                } else {
-	                    env.remove(a.dest().toString());
-	                }
-	            } else if (t instanceof ir.tac.Call c){
-	            	// 1) Substitute constant/propagated args
-	                java.util.List<ir.tac.Value> newArgs = new java.util.ArrayList<>();
-	                if (c.args() != null) {
-	                    for (ir.tac.Value v : c.args()) {
-	                        if (v instanceof ir.tac.Variable vv && env.containsKey(vv.toString())) {
-	                            newArgs.add(env.get(vv.toString()));   // replace var with literal/var from env
-	                        } else {
-	                            newArgs.add(v);
-	                        }
-	                    }
-	                }
+                    // ---- CF: constant fold (on resolved operands)
+                    if (doCF) {
+                        ir.tac.Value cf = tryFold(op, L, R);
+                        if (cf != null){
+                            if (doCP) env.put(a.dest().toString(), cf);
+                            out.add(prettyAssign(a.id(), a.dest(), "mov", cf, null));
+                            continue;
+                        }
+                    }
 
-	                // 2) Rebuild the call (with or without a return target)
-	                if (c.dest() != null) {
-	                    out.add(new ir.tac.Call(c.id(), c.function(), newArgs, c.dest()));
-	                    // dest is overwritten by the call => kill any mapping for it
-	                    env.remove(c.dest().toString());
-	                } else {
-	                    out.add(new ir.tac.Call(c.id(), c.function(), newArgs));
-	                }
+                    // ---- CSE
+                    if (doCSE && R != null && isPure(op)) {
+                        String key = op + "|" + keyOf(L) + "|" + keyOf(R);
+                        ir.tac.Variable prev = cse.get(key);
+                        if (prev != null){
+                            if (doCP) env.put(a.dest().toString(), prev);
+                            out.add(prettyAssign(a.id(), a.dest(), "mov", prev, null));
+                            continue;
+                        } else {
+                            cse.put(key, a.dest());
+                        }
+                    }
 
-	                // 3) Calls are side-effecting: drop CP/CSE state after rewriting
-	                env.clear();
-	                cse.clear();
-	                continue;
-	            } else {
-	                out.add(t);
-	            }
-	        }
+                    // Materialize instruction
+                    out.add(prettyAssign(a.id(), a.dest(), op, L, R));
 
-	        // ------- backward pass: DCE -------
-	        java.util.Set<String> live = new java.util.HashSet<>();
-	        java.util.List<ir.tac.TAC> pruned = new java.util.ArrayList<>();
+                    // ---- CP: kill mapping on non-mov defs
+                    if (doCP) {
+                        env.remove(a.dest().toString());
+                    }
+                }
+                else if (t instanceof ir.tac.Call c){
+                    // CP into call args only if CP is enabled
+                    if (doCP && c.args()!=null) {
+                        List<ir.tac.Value> newArgs = new ArrayList<>();
+                        for (ir.tac.Value v : c.args()) {
+                            newArgs.add(resolve(v, env)); // transitive
+                        }
+                        ir.tac.Call newCall;
+                        if (c.dest()!=null) {
+                            newCall = new ir.tac.Call(c.id(), c.function(), newArgs, c.dest());
+                            // kill mapping only for dest
+                            env.remove(c.dest().toString());
+                        } else {
+                            newCall = new ir.tac.Call(c.id(), c.function(), newArgs);
+                        }
+                        out.add(newCall);
 
-	        for (int i = out.size()-1; i>=0; --i){
-	            ir.tac.TAC t = out.get(i);
+                        // calls are side-effecting for CSE, but we KEEP env now
+                        cse.clear();
+                    } else {
+                        out.add(t);
+                        // still treat as barrier for CSE
+                        cse.clear();
+                        if (c.dest()!=null) env.remove(c.dest().toString());
+                    }
+                }
+                else {
+                    out.add(t);
+                }
+            }
 
-	            if (t instanceof ir.tac.Assign a){
-	                String op  = a.opcode();
-	                String def = (a.dest()==null) ? null : a.dest().toString();
+            // ---- DCE only if requested
+            List<ir.tac.TAC> finalIns = out;
+            if (doDCE) {
+                Set<String> live = new HashSet<>();
+                List<ir.tac.TAC> pruned = new ArrayList<>();
+                for (int i = out.size()-1; i>=0; --i){
+                    ir.tac.TAC t2 = out.get(i);
+                    if (t2 instanceof ir.tac.Assign a){
+                        String op = a.opcode();
+                        String def = (a.dest()==null) ? null : a.dest().toString();
+                        boolean essential = "label".equals(op) || "test".equals(op) || "ret".equals(op);
+                        boolean keep = essential || (def != null && live.contains(def));
+                        if (keep) {
+                            if (a.left()  instanceof ir.tac.Variable v)  live.add(v.toString());
+                            if (a.right() instanceof ir.tac.Variable v2) live.add(v2.toString());
+                            if (def != null) live.remove(def);
+                            pruned.add(0, t2);
+                        }
+                    } else if (t2 instanceof ir.tac.Call c2) {
+                        if (c2.args()!=null) for (ir.tac.Value v : c2.args())
+                            if (v instanceof ir.tac.Variable var) live.add(var.toString());
+                        pruned.add(0, t2);
+                    } else pruned.add(0, t2);
+                }
+                finalIns = pruned;
+            }
 
-	                boolean essential = "label".equals(op) || "test".equals(op) || "ret".equals(op);
-	                boolean keep = essential || (def != null && live.contains(def));
-
-	                if (keep) {
-	                    // add uses (only for kept instructions)
-	                    if (a.left()  instanceof ir.tac.Variable v)  live.add(v.toString());
-	                    if (a.right() instanceof ir.tac.Variable v2) live.add(v2.toString());
-	                    if (def != null) live.remove(def); // def is satisfied
-	                    pruned.add(0, t);
-	                }
-	                // else: drop it (do NOT add uses)
-	            }
-
-	            else if (t instanceof ir.tac.Call c) {
-	                // mark call arguments live and always keep calls
-	                java.util.List<ir.tac.Value> args = c.args();
-	                if (args != null) {
-	                    for (ir.tac.Value v : args)
-	                        if (v instanceof ir.tac.Variable var) live.add(var.toString());
-	                }
-	                pruned.add(0, t);
-	            }
-
-	            else {
-	                pruned.add(0, t);
-	            }
-	        }
-
-	        bb.instructions().clear();
-	        bb.instructions().addAll(pruned);
-	    }
-	}
+            bb.instructions().clear();
+            bb.instructions().addAll(finalIns);
+        }
+    }
 	
 	
 	private static void removeOrphanFunctions(List<BasicBlock> blocks) {
@@ -1624,14 +1541,44 @@ public class Compiler {
 
         @Override
         public void visit(AST.Assignment node) {
-            if (!(node.getDestination() instanceof AST.Identifier id))
+            if (!(node.getDestination() instanceof AST.Identifier id)) {
                 throw new RuntimeException("Only simple lvalues supported in this minimal builder.");
+            }
+
             Variable dst = v(id.getName());
-            Value rhs = val(node.getSource());
-            cur.addInstruction(new Assign(newId(), dst, rhs, null) {
-                @Override protected String op(){ return "mov"; }
-                @Override public String toString(){ return pretty(op(), dst, rhs, null); }
-            });
+            ast.Expression src = node.getSource();
+
+            // ---------- 1. Simple RHS: identifier or literal ----------
+            if (src instanceof AST.Identifier ||
+                src instanceof AST.IntegerLiteral ||
+                src instanceof AST.FloatLiteral ||
+                src instanceof AST.BoolLiteral) {
+
+                Value rhs = val(src); // val() just returns a Variable or Literal here
+                cur.addInstruction(prettyAssign(newId(), dst, "mov", rhs, null));
+                return;
+            }
+
+            // ---------- 2. Function call returning into dst ----------
+            if (src instanceof AST.FunctionCall fc) {
+                java.util.ArrayList<Value> args = new java.util.ArrayList<>();
+                for (ast.Expression e : fc.getArguments().getArguments()) {
+                    args.add(val(e));        // this may create temps for complex args; that's fine
+                }
+                cur.addInstruction(new Call(
+                    newId(),
+                    new mocha.Symbol(fc.getIdentifier().getName(), null),
+                    args,
+                    dst    // return value goes directly into dst
+                ));
+                return;
+            }
+
+            // ---------- 3. Fallback: original behaviour ----------
+            // For arbitrary expressions (a + b, c + d * e, relations, etc.), we go through val().
+            // This is the old safe pattern: t = <expr>; dst = mov t
+            Value rhs = val(src);
+            cur.addInstruction(prettyAssign(newId(), dst, "mov", rhs, null));
         }
 
         @Override
@@ -1825,58 +1772,61 @@ public class Compiler {
 
     /** Run selected optimizations and return DOT text of the resulting IR. */
     public String optimization(List<String> opts, boolean loop, boolean max) {
-        if (currentIR == null) currentIR = genIR(this.astRoot); // safety
+    // Always rebuild IR fresh for each optimization run
+    currentIR = genIR(this.astRoot);
 
-        // TODO: apply passes in `opts` (e.g., "dce"), and loop to convergence if requested.
-        
-        List<String> plan;
-        if (max || opts == null || opts.isEmpty()) {
-            // "max" pipeline (feel free to reorder if you want)
-            plan = Arrays.asList("cp","cf","cse","dce","cfg","ofe","merge");
-        } else {
-            plan = new ArrayList<>(opts);
-        }
+    // Reinterpret 'max': only true when no explicit -o options were passed.
+    boolean realMax = max && (opts == null || opts.isEmpty());
 
-        // Run once or to convergence depending on 'loop'
-        String prev;
-        do {
-            prev = currentIR.asDotGraph();
-
-            for (String p : plan) {
-                switch (p.toLowerCase()) {
-                    case "cp":    // constant propagation (in your Optimizer forward pass)
-                    case "cf":    // constant folding      (in your Optimizer)
-                    case "cse":   // common subexpr elim   (in your Optimizer)
-                    case "dce":   // dead code elim        (in your backward pass)
-                        new Optimizer().optimize(currentIR.blocks());
-                        break;
-
-                    case "cfg":   // branch folding + unreachable BBs
-                        CFGSimplifier.simplify(currentIR.blocks());
-                        break;
-
-                    case "ofe":   // orphan function elimination (call graph prune)
-                        removeOrphanFunctions(currentIR.blocks());
-                        break;
-
-                    case "merge": // merge trivial empty blocks
-                        mergeTrivialEmpties(currentIR.blocks());
-                        break;
-
-                    default:
-                        // unknown pass name -> ignore
-                        break;
-                }
-            }
-            // Keep looping while the DOT changes and 'loop' is requested
-        } while (loop && !currentIR.asDotGraph().equals(prev));
-
-        lastPostDot = currentIR.asDotGraph();
-        return lastPostDot;
-        
-        // For now, no-ops — just return the graph of currentIR.
-        //return currentIR.asDotGraph();
+    List<String> plan;
+    if (realMax) {
+        // True "max" pipeline: no -o flags, but -max was (implicitly) requested
+        plan = Arrays.asList("cp","cf","cse","dce","cfg","ofe","merge");
+    } else if (opts != null && !opts.isEmpty()) {
+        // Explicit -o sequence: honor user order, ignore bogus 'max'
+        plan = new ArrayList<>(opts);
+    } else {
+        // No -max, no -o → no optimizations
+        plan = Collections.emptyList();
     }
+
+    String prev;
+    do {
+        prev = currentIR.asDotGraph();
+
+        for (String p : plan) {
+            switch (p.toLowerCase()) {
+                case "cp":
+                    new Optimizer(true,  false, false, false).optimize(currentIR.blocks());
+                    break;
+                case "cf":
+                    new Optimizer(false, true,  false, false).optimize(currentIR.blocks());
+                    break;
+                case "cse":
+                    new Optimizer(false, false, true,  false).optimize(currentIR.blocks());
+                    break;
+                case "dce":
+                    new Optimizer(false, false, false, true ).optimize(currentIR.blocks());
+                    break;
+                case "cfg":
+                    CFGSimplifier.simplify(currentIR.blocks());
+                    break;
+                case "ofe":
+                    removeOrphanFunctions(currentIR.blocks());
+                    break;
+                case "merge":
+                    mergeTrivialEmpties(currentIR.blocks());
+                    break;
+                default:
+                    break;
+            }
+        }
+        // Loop to convergence only if 'loop' parameter is true
+    } while (loop && !currentIR.asDotGraph().equals(prev));
+
+    lastPostDot = currentIR.asDotGraph();
+    return lastPostDot;
+}
     
  // ---------- Minimal interpreter for the I/O test ----------
     	private static final class MiniInterpreter implements ast.NodeVisitor {
