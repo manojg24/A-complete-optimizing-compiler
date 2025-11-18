@@ -7,8 +7,6 @@ import java.io.InputStream;
 import java.util.*;
 import ir.cfg.BasicBlock;
 import ir.cfg.CFGPrinter;
-import ir.cfg.BasicBlock;
-import ir.cfg.CFGPrinter;
 import ir.tac.*;
 
 import ast.AST;
@@ -847,8 +845,7 @@ public class Compiler {
 	    }
 
 	    private ir.tac.Assign newAssignLike(ir.tac.Assign a, ir.tac.Variable d, ir.tac.Value L, ir.tac.Value R){
-	        final String op = a.opcode();
-	        return new ir.tac.Assign(a.id(), d, L, R){ @Override protected String op(){ return op; }};
+	        return prettyAssign(a.id(), d, a.opcode(), L, R);
 	    }
 
 	    private ir.tac.Value tryFold(String op, ir.tac.Value L, ir.tac.Value R){
@@ -946,81 +943,86 @@ public class Compiler {
 
 	                if ("mov".equals(op)){
 	                    env.put(a.dest().toString(), L);
-	                    out.add(new ir.tac.Assign(a.id(), a.dest(), L, null){ @Override protected String op(){ return "mov"; }});
+	                    out.add(prettyAssign(a.id(), a.dest(), "mov", L, null));
 	                    continue;
 	                }
 	                
 	                if ("add".equals(op)) {
 	                    // x + 0 -> x   |   0 + x -> x
 	                    if (R instanceof ir.tac.Literal lr && zero(lr)) {
-	                        out.add(new ir.tac.Assign(a.id(), a.dest(), L, null){ @Override protected String op(){ return "mov"; }});
+	                    	out.add(prettyAssign(a.id(), a.dest(), "mov", L, null));
 	                        env.put(a.dest().toString(), L); continue;
 	                    }
 	                    if (L instanceof ir.tac.Literal ll && zero(ll)) {
-	                        out.add(new ir.tac.Assign(a.id(), a.dest(), R, null){ @Override protected String op(){ return "mov"; }});
+	                    	out.add(prettyAssign(a.id(), a.dest(), "mov", R, null));
 	                        env.put(a.dest().toString(), R); continue;
 	                    }
 	                }
 	                if ("sub".equals(op)) {
 	                    // x - 0 -> x
 	                    if (R instanceof ir.tac.Literal lr && zero(lr)) {
-	                        out.add(new ir.tac.Assign(a.id(), a.dest(), L, null){ @Override protected String op(){ return "mov"; }});
+	                    	out.add(prettyAssign(a.id(), a.dest(), "mov", L, null));
 	                        env.put(a.dest().toString(), L); continue;
 	                    }
 	                    // x - x -> 0
 	                    if (eqVal(L,R)) {
-	                        out.add(new ir.tac.Assign(a.id(), a.dest(), new ir.tac.Literal(0), null){ @Override protected String op(){ return "mov"; }});
-	                        env.put(a.dest().toString(), new ir.tac.Literal(0)); continue;
+	                    	out.add(prettyAssign(a.id(), a.dest(), "mov", new ir.tac.Literal(0), null));
+	                        env.put(a.dest().toString(), new ir.tac.Literal(0));
+	                        continue;
 	                    }
 	                }
 	                if ("mul".equals(op)) {
 	                    // x * 1 -> x   |   1 * x -> x
 	                    if (R instanceof ir.tac.Literal lr && one(lr)) {
-	                        out.add(new ir.tac.Assign(a.id(), a.dest(), L, null){ @Override protected String op(){ return "mov"; }});
+	                    	out.add(prettyAssign(a.id(), a.dest(), "mov", L, null));
 	                        env.put(a.dest().toString(), L); continue;
 	                    }
 	                    if (L instanceof ir.tac.Literal ll && one(ll)) {
-	                        out.add(new ir.tac.Assign(a.id(), a.dest(), R, null){ @Override protected String op(){ return "mov"; }});
+	                    	out.add(prettyAssign(a.id(), a.dest(), "mov", R, null));
 	                        env.put(a.dest().toString(), R); continue;
 	                    }
 	                    // x * 0 -> 0   |   0 * x -> 0
 	                    if ((R instanceof ir.tac.Literal lr0 && zero(lr0)) || (L instanceof ir.tac.Literal ll0 && zero(ll0))) {
-	                        out.add(new ir.tac.Assign(a.id(), a.dest(), new ir.tac.Literal(0), null){ @Override protected String op(){ return "mov"; }});
+	                    	out.add(prettyAssign(a.id(), a.dest(), "mov", new ir.tac.Literal(0), null));
 	                        env.put(a.dest().toString(), new ir.tac.Literal(0)); continue;
 	                    }
 	                }
 	                if ("div".equals(op)) {
 	                    // x / 1 -> x
 	                    if (R instanceof ir.tac.Literal lr && one(lr)) {
-	                        out.add(new ir.tac.Assign(a.id(), a.dest(), L, null){ @Override protected String op(){ return "mov"; }});
+	                    	out.add(prettyAssign(a.id(), a.dest(), "mov", L, null));
 	                        env.put(a.dest().toString(), L); continue;
 	                    }
 	                    // 0 / x -> 0 (x != 0 unknown at compile time -> still safe to fold 0/x to 0)
 	                    if (L instanceof ir.tac.Literal ll0 && zero(ll0)) {
-	                        out.add(new ir.tac.Assign(a.id(), a.dest(), new ir.tac.Literal(0), null){ @Override protected String op(){ return "mov"; }});
-	                        env.put(a.dest().toString(), new ir.tac.Literal(0)); continue;
+	                    	out.add(prettyAssign(a.id(), a.dest(), "mov", new ir.tac.Literal(0), null));
+	                        env.put(a.dest().toString(), new ir.tac.Literal(0));
+	                        continue;
 	                    }
 	                    // self-division x / x -> 1  (avoid 0/0 by being conservative: only when L==R and not literal 0)
 	                    if (eqVal(L,R) && !(L instanceof ir.tac.Literal zl && zero(zl))) {
-	                        out.add(new ir.tac.Assign(a.id(), a.dest(), new ir.tac.Literal(1), null){ @Override protected String op(){ return "mov"; }});
-	                        env.put(a.dest().toString(), new ir.tac.Literal(1)); continue;
+	                    	out.add(prettyAssign(a.id(), a.dest(), "mov", new ir.tac.Literal(1), null));
+	                        env.put(a.dest().toString(), new ir.tac.Literal(1));
+	                        continue;
 	                    }
 	                }
 	                if ("pow".equals(op)) {
 	                    // x ^ 1 -> x
 	                    if (R instanceof ir.tac.Literal lr && isNumber(lr, 1.0)) {
-	                        out.add(new ir.tac.Assign(a.id(), a.dest(), L, null){ @Override protected String op(){ return "mov"; }});
+	                    	out.add(prettyAssign(a.id(), a.dest(), "mov", L, null));
 	                        env.put(a.dest().toString(), L); continue;
 	                    }
 	                    // x ^ 0 -> 1
 	                    if (R instanceof ir.tac.Literal lr0 && isNumber(lr0, 0.0)) {
-	                        out.add(new ir.tac.Assign(a.id(), a.dest(), new ir.tac.Literal(1), null){ @Override protected String op(){ return "mov"; }});
-	                        env.put(a.dest().toString(), new ir.tac.Literal(1)); continue;
+	                    	out.add(prettyAssign(a.id(), a.dest(), "mov", new ir.tac.Literal(1), null));
+	                        env.put(a.dest().toString(), new ir.tac.Literal(1));
+	                        continue;
 	                    }
 	                    // 1 ^ y -> 1
 	                    if (L instanceof ir.tac.Literal ll1 && isNumber(ll1, 1.0)) {
-	                        out.add(new ir.tac.Assign(a.id(), a.dest(), new ir.tac.Literal(1), null){ @Override protected String op(){ return "mov"; }});
-	                        env.put(a.dest().toString(), new ir.tac.Literal(1)); continue;
+	                    	 out.add(prettyAssign(a.id(), a.dest(), "mov", new ir.tac.Literal(1), null));
+	                    	 env.put(a.dest().toString(), new ir.tac.Literal(1));
+	                    	 continue;
 	                    }
 	                }	
 
@@ -1028,7 +1030,7 @@ public class Compiler {
 	                ir.tac.Value cf = tryFold(op, L, R);
 	                if (cf != null){
 	                    env.put(a.dest().toString(), cf);
-	                    out.add(new ir.tac.Assign(a.id(), a.dest(), cf, null){ @Override protected String op(){ return "mov"; }});
+	                    out.add(prettyAssign(a.id(), a.dest(), "mov", cf, null));
 	                    continue;
 	                }
 
@@ -1038,7 +1040,7 @@ public class Compiler {
 	                    ir.tac.Variable prev = cse.get(key);
 	                    if (prev != null){
 	                        env.put(a.dest().toString(), prev);
-	                        out.add(new ir.tac.Assign(a.id(), a.dest(), prev, null){ @Override protected String op(){ return "mov"; }});
+	                        out.add(prettyAssign(a.id(), a.dest(), "mov", prev, null));
 	                        continue;
 	                    } else {
 	                        cse.put(key, a.dest());
@@ -1053,9 +1055,31 @@ public class Compiler {
 	                    env.remove(a.dest().toString());
 	                }
 	            } else if (t instanceof ir.tac.Call c){
-	                // calls are side-effecting
-	                env.clear(); cse.clear();
-	                out.add(t);
+	            	// 1) Substitute constant/propagated args
+	                java.util.List<ir.tac.Value> newArgs = new java.util.ArrayList<>();
+	                if (c.args() != null) {
+	                    for (ir.tac.Value v : c.args()) {
+	                        if (v instanceof ir.tac.Variable vv && env.containsKey(vv.toString())) {
+	                            newArgs.add(env.get(vv.toString()));   // replace var with literal/var from env
+	                        } else {
+	                            newArgs.add(v);
+	                        }
+	                    }
+	                }
+
+	                // 2) Rebuild the call (with or without a return target)
+	                if (c.dest() != null) {
+	                    out.add(new ir.tac.Call(c.id(), c.function(), newArgs, c.dest()));
+	                    // dest is overwritten by the call => kill any mapping for it
+	                    env.remove(c.dest().toString());
+	                } else {
+	                    out.add(new ir.tac.Call(c.id(), c.function(), newArgs));
+	                }
+
+	                // 3) Calls are side-effecting: drop CP/CSE state after rewriting
+	                env.clear();
+	                cse.clear();
+	                continue;
 	            } else {
 	                out.add(t);
 	            }
@@ -1182,6 +1206,12 @@ public class Compiler {
     	    }
 
     	    builder.resetToMain();
+    	    
+    	    // emit default init MOVs for GLOBALS
+            for (AST.Declaration d : ast.getRoot().variables())
+            {
+                if (d instanceof AST.VariableDeclaration vd) vd.accept(builder);
+            }
 
     	    ast.getRoot().mainStatementSequence().accept(builder);
     	}
@@ -1196,7 +1226,14 @@ public class Compiler {
 //        new Optimizer().optimize(currentIR.blocks());
 //        mergeTrivialEmpties(currentIR.blocks());
 //        
-//        lastPostDot = currentIR.asDotGraph(); // After Optimization
+        lastPostDot = currentIR.asDotGraph(); // After Optimization
+        
+////        //Register allocation hook 
+//        LinearScanAllocator alloc = new LinearScanAllocator(numDataRegisters);
+//        LinearScanAllocator.Result map = alloc.allocate(currentIR.blocks());
+//        alloc.rewrite(currentIR.blocks(), map);
+//        
+//        removeSillyMoves(currentIR.blocks());
         
 	    return currentIR;
     }
@@ -1360,6 +1397,57 @@ public class Compiler {
         @Override public void visit(ast.Computation n) {}
     }
     
+ // Pretty-print helpers (inside class Compiler)
+    private static String opSym(String op) {
+        return switch (op) {
+            case "add" -> "+";
+            case "sub" -> "-";
+            case "mul" -> "*";
+            case "div" -> "/";
+            case "mod" -> "%";
+            case "pow" -> "^";
+            case "cmpeq" -> "==";
+            case "cmpne" -> "!=";
+            case "cmplt" -> "<";
+            case "cmple" -> "<=";
+            case "cmpgt" -> ">";
+            case "cmpge" -> ">=";
+            case "and" -> "&&";
+            case "or"  -> "||";
+            case "not" -> "!";   // unary
+            // keep fallbacks for anything unusual
+            default -> op;
+        };
+    }
+
+    private static String pretty(String op, ir.tac.Variable dst, ir.tac.Value L, ir.tac.Value R) {
+        if ("mov".equals(op)) {                 // x = y
+            return dst + " = " + (L == null ? "" : L.toString());
+        }
+        if ("not".equals(op)) {                 // t = !x
+            return dst + " = " + opSym(op) + (L == null ? "" : L.toString());
+        }
+        // binary infix: t = L (+) R
+        return dst + " = " + (L==null ? "" : L.toString()) + " " + opSym(op) + " " + (R==null ? "" : R.toString());
+    }
+    
+ // Create an Assign that prints infix with pretty()
+    private static ir.tac.Assign prettyAssign(int id,
+            ir.tac.Variable dst,
+            String opcode,
+            ir.tac.Value L,
+            ir.tac.Value R) {
+	return new ir.tac.Assign(id, dst, L, R) {
+	@Override protected String op() { return opcode; }
+	@Override public String toString() {
+	if ("label".equals(opcode) || "test".equals(opcode) || "ret".equals(opcode)) {
+	return super.toString();
+	}
+	return pretty(op(), dst, left(), right());
+	}
+	};
+	}
+    
     private final class IRBuilder extends NodeVisitorAdapter {
     	private final List<BasicBlock> blocks = new ArrayList<>();
         private BasicBlock cur;
@@ -1391,74 +1479,118 @@ public class Compiler {
             if (e instanceof AST.Identifier     id) return v(id.getName());
 
             // ----- arithmetic binary ops -----
+         // ADD
             if (e instanceof AST.Addition add) {
                 Value L = val(add.getLeft()), R = val(add.getRight());
                 Variable t = newTmp();
-                cur.addInstruction(new Add(newId(), t, L, R)); // concrete Add TAC class you already have
+                cur.addInstruction(new Assign(newId(), t, L, R) {
+                    @Override protected String op(){ return "add"; }
+                    @Override public String toString(){ return pretty(op(), t, L, R); }
+                });
                 return t;
             }
+
+            // SUB
             if (e instanceof AST.Subtraction sub) {
                 Value L = val(sub.getLeft()), R = val(sub.getRight());
                 Variable t = newTmp();
-                cur.addInstruction(new Assign(newId(), t, L, R){ @Override protected String op(){ return "sub"; }});
+                cur.addInstruction(new Assign(newId(), t, L, R) {
+                    @Override protected String op(){ return "sub"; }
+                    @Override public String toString(){ return pretty(op(), t, L, R); }
+                });
                 return t;
             }
+
+            // MUL
             if (e instanceof AST.Multiplication mul) {
                 Value L = val(mul.getLeft()), R = val(mul.getRight());
                 Variable t = newTmp();
-                cur.addInstruction(new Assign(newId(), t, L, R){ @Override protected String op(){ return "mul"; }});
+                cur.addInstruction(new Assign(newId(), t, L, R) {
+                    @Override protected String op(){ return "mul"; }
+                    @Override public String toString(){ return pretty(op(), t, L, R); }
+                });
                 return t;
             }
+
+            // DIV
             if (e instanceof AST.Division div) {
                 Value L = val(div.getLeft()), R = val(div.getRight());
                 Variable t = newTmp();
-                cur.addInstruction(new Assign(newId(), t, L, R){ @Override protected String op(){ return "div"; }});
+                cur.addInstruction(new Assign(newId(), t, L, R) {
+                    @Override protected String op(){ return "div"; }
+                    @Override public String toString(){ return pretty(op(), t, L, R); }
+                });
                 return t;
             }
+
+            // MOD
             if (e instanceof AST.Modulo mod) {
                 Value L = val(mod.getLeft()), R = val(mod.getRight());
                 Variable t = newTmp();
-                cur.addInstruction(new Assign(newId(), t, L, R){ @Override protected String op(){ return "mod"; }});
+                cur.addInstruction(new Assign(newId(), t, L, R) {
+                    @Override protected String op(){ return "mod"; }
+                    @Override public String toString(){ return pretty(op(), t, L, R); }
+                });
                 return t;
             }
 
-            // ----- power (^) -----
+            // POW (^)
             if (e instanceof AST.Power pow) {
                 Value L = val(pow.getBase()), R = val(pow.getExponent());
                 Variable t = newTmp();
-                cur.addInstruction(new Assign(newId(), t, L, R){ @Override protected String op(){ return "pow"; }});
+                cur.addInstruction(new Assign(newId(), t, L, R) {
+                    @Override protected String op(){ return "pow"; }
+                    @Override public String toString(){ return pretty(op(), t, L, R); }
+                });
                 return t;
             }
 
-            // ----- unary minus -----
+            // Unary minus   encode -x as (0 - x)
             if (e instanceof AST.UnaryMinus um) {
                 Value R = val(um.getExpr());
                 Variable t = newTmp();
-                // encode -x as (0 - x)
-                cur.addInstruction(new Assign(newId(), t, new Literal(0), R){ @Override protected String op(){ return "sub"; }});
+                Value Z = new Literal(0);
+                cur.addInstruction(new Assign(newId(), t, Z, R) {
+                    @Override protected String op(){ return "sub"; }
+                    @Override public String toString(){ return pretty(op(), t, Z, R); }
+                });
                 return t;
             }
 
             // ----- logical not / and / or (non–short-circuit; fine for IR & folding) -----
+         // NOT
             if (e instanceof AST.LogicalNot ln) {
                 Value R = val(ln.getExpression());
                 Variable t = newTmp();
-                cur.addInstruction(new Assign(newId(), t, R, null){ @Override protected String op(){ return "not"; }});
+                cur.addInstruction(new Assign(newId(), t, R, null) {
+                    @Override protected String op(){ return "not"; }
+                    @Override public String toString(){ return pretty(op(), t, R, null); }
+                });
                 return t;
             }
+
+            // AND
             if (e instanceof AST.LogicalAnd la) {
                 Value L = val(la.getLeft()), R = val(la.getRight());
                 Variable t = newTmp();
-                cur.addInstruction(new Assign(newId(), t, L, R){ @Override protected String op(){ return "and"; }});
+                cur.addInstruction(new Assign(newId(), t, L, R) {
+                    @Override protected String op(){ return "and"; }
+                    @Override public String toString(){ return pretty(op(), t, L, R); }
+                });
                 return t;
             }
+
+            // OR
             if (e instanceof AST.LogicalOr lo) {
                 Value L = val(lo.getLeft()), R = val(lo.getRight());
                 Variable t = newTmp();
-                cur.addInstruction(new Assign(newId(), t, L, R){ @Override protected String op(){ return "or"; }});
+                cur.addInstruction(new Assign(newId(), t, L, R) {
+                    @Override protected String op(){ return "or"; }
+                    @Override public String toString(){ return pretty(op(), t, L, R); }
+                });
                 return t;
             }
-            
+
             // Relations
             if (e instanceof AST.Relation rel) {
                 Value L = val(rel.getLeft()), R = val(rel.getRight());
@@ -1469,7 +1601,10 @@ public class Compiler {
                     case ">"  -> "cmpgt"; case ">=" -> "cmpge";
                     default -> "cmp?";
                 };
-                cur.addInstruction(new Assign(newId(), t, L, R){ @Override protected String op(){ return op; }});
+                cur.addInstruction(new Assign(newId(), t, L, R) {
+                    @Override protected String op(){ return op; }
+                    @Override public String toString(){ return pretty(op(), t, L, R); }
+                });
                 return t;
             }
             
@@ -1495,7 +1630,7 @@ public class Compiler {
             Value rhs = val(node.getSource());
             cur.addInstruction(new Assign(newId(), dst, rhs, null) {
                 @Override protected String op(){ return "mov"; }
-                @Override public String toString(){ return dst + " = " + (rhs==null ? "" : rhs.toString()); }
+                @Override public String toString(){ return pretty(op(), dst, rhs, null); }
             });
         }
 
@@ -1646,13 +1781,13 @@ public class Compiler {
             String name = n.getIdentifier().getName();
             types.Type t = ((AST.TypeNode) n.getTypeNode()).getActualType();
             ir.tac.Literal def = null;
-            if (t instanceof types.IntType)      def = new ir.tac.Literal(0);
+            if (t instanceof types.IntType)        def = new ir.tac.Literal(0);
             else if (t instanceof types.FloatType) def = new ir.tac.Literal(0.0f);
             else if (t instanceof types.BoolType)  def = new ir.tac.Literal(false);
 
             if (def != null) {
                 Variable v = v(name);
-                cur.addInstruction(new Assign(newId(), v, def, null){ @Override protected String op(){ return "mov"; }});
+                cur.addInstruction(prettyAssign(newId(), v, "mov", def, null));
             }
             setInit(name);
         }
