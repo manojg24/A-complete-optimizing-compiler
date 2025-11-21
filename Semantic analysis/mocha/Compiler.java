@@ -1366,7 +1366,7 @@ public class Compiler {
 	}
     
     private final class IRBuilder extends NodeVisitorAdapter {
-    	private final List<BasicBlock> blocks = new ArrayList<>();
+        private final List<BasicBlock> blocks = new ArrayList<>();
         private BasicBlock cur;
         private int nextTacId = 1;
         private int tmpCounter = 0;
@@ -1374,7 +1374,7 @@ public class Compiler {
         IRBuilder() { cur = newBB(); }
 
         List<BasicBlock> getBlocks() { return blocks; }
-        
+
         BasicBlock mainEntry() { return blocks.get(0); }
         void resetToMain() { this.cur = mainEntry(); }
 
@@ -1388,152 +1388,160 @@ public class Compiler {
         private Variable newTmp() { return v("_t" + (++tmpCounter)); }
         private Variable v(String name) { return new Variable(new mocha.Symbol(name, null)); }
 
-        /** Lower an expression to a Value (using temps & TAC when needed). */
+        // ------------ core expression lowering helpers ------------
+
+        /** Old helper: lower expression, always using temps for intermediate results. */
         private Value val(ast.Expression e) {
-        	if (e instanceof AST.IntegerLiteral il) return new Literal(il.getValue());
+            return valInto(e, null);
+        }
+
+        /**
+         * Lower an expression to a Value, *preferably* using 'preferredDst' as the
+         * destination for the top-level operation, to avoid extra
+         *   tmp = a + b; x = tmp
+         * patterns in assignments.
+         */
+        private Value valInto(ast.Expression e, Variable preferredDst) {
+            // literals and identifiers: no TAC, just return a Value
+            if (e instanceof AST.IntegerLiteral il) return new Literal(il.getValue());
             if (e instanceof AST.FloatLiteral   fl) return new Literal(fl.getValue());
             if (e instanceof AST.BoolLiteral    bl) return new Literal(bl.getValue());
             if (e instanceof AST.Identifier     id) return v(id.getName());
 
+            // choose destination for this node if we need one
+            Variable dst = (preferredDst != null) ? preferredDst : newTmp();
+
             // ----- arithmetic binary ops -----
-         // ADD
             if (e instanceof AST.Addition add) {
-                Value L = val(add.getLeft()), R = val(add.getRight());
-                Variable t = newTmp();
-                cur.addInstruction(new Assign(newId(), t, L, R) {
+                Value L = val(add.getLeft());
+                Value R = val(add.getRight());
+                cur.addInstruction(new Assign(newId(), dst, L, R) {
                     @Override protected String op(){ return "add"; }
-                    @Override public String toString(){ return pretty(op(), t, L, R); }
+                    @Override public String toString(){ return pretty(op(), dst, L, R); }
                 });
-                return t;
+                return dst;
             }
 
-            // SUB
             if (e instanceof AST.Subtraction sub) {
-                Value L = val(sub.getLeft()), R = val(sub.getRight());
-                Variable t = newTmp();
-                cur.addInstruction(new Assign(newId(), t, L, R) {
+                Value L = val(sub.getLeft());
+                Value R = val(sub.getRight());
+                cur.addInstruction(new Assign(newId(), dst, L, R) {
                     @Override protected String op(){ return "sub"; }
-                    @Override public String toString(){ return pretty(op(), t, L, R); }
+                    @Override public String toString(){ return pretty(op(), dst, L, R); }
                 });
-                return t;
+                return dst;
             }
 
-            // MUL
             if (e instanceof AST.Multiplication mul) {
-                Value L = val(mul.getLeft()), R = val(mul.getRight());
-                Variable t = newTmp();
-                cur.addInstruction(new Assign(newId(), t, L, R) {
+                Value L = val(mul.getLeft());
+                Value R = val(mul.getRight());
+                cur.addInstruction(new Assign(newId(), dst, L, R) {
                     @Override protected String op(){ return "mul"; }
-                    @Override public String toString(){ return pretty(op(), t, L, R); }
+                    @Override public String toString(){ return pretty(op(), dst, L, R); }
                 });
-                return t;
+                return dst;
             }
 
-            // DIV
             if (e instanceof AST.Division div) {
-                Value L = val(div.getLeft()), R = val(div.getRight());
-                Variable t = newTmp();
-                cur.addInstruction(new Assign(newId(), t, L, R) {
+                Value L = val(div.getLeft());
+                Value R = val(div.getRight());
+                cur.addInstruction(new Assign(newId(), dst, L, R) {
                     @Override protected String op(){ return "div"; }
-                    @Override public String toString(){ return pretty(op(), t, L, R); }
+                    @Override public String toString(){ return pretty(op(), dst, L, R); }
                 });
-                return t;
+                return dst;
             }
 
-            // MOD
             if (e instanceof AST.Modulo mod) {
-                Value L = val(mod.getLeft()), R = val(mod.getRight());
-                Variable t = newTmp();
-                cur.addInstruction(new Assign(newId(), t, L, R) {
+                Value L = val(mod.getLeft());
+                Value R = val(mod.getRight());
+                cur.addInstruction(new Assign(newId(), dst, L, R) {
                     @Override protected String op(){ return "mod"; }
-                    @Override public String toString(){ return pretty(op(), t, L, R); }
+                    @Override public String toString(){ return pretty(op(), dst, L, R); }
                 });
-                return t;
+                return dst;
             }
 
             // POW (^)
             if (e instanceof AST.Power pow) {
-                Value L = val(pow.getBase()), R = val(pow.getExponent());
-                Variable t = newTmp();
-                cur.addInstruction(new Assign(newId(), t, L, R) {
+                Value L = val(pow.getBase());
+                Value R = val(pow.getExponent());
+                cur.addInstruction(new Assign(newId(), dst, L, R) {
                     @Override protected String op(){ return "pow"; }
-                    @Override public String toString(){ return pretty(op(), t, L, R); }
+                    @Override public String toString(){ return pretty(op(), dst, L, R); }
                 });
-                return t;
+                return dst;
             }
 
             // Unary minus   encode -x as (0 - x)
             if (e instanceof AST.UnaryMinus um) {
                 Value R = val(um.getExpr());
-                Variable t = newTmp();
                 Value Z = new Literal(0);
-                cur.addInstruction(new Assign(newId(), t, Z, R) {
+                cur.addInstruction(new Assign(newId(), dst, Z, R) {
                     @Override protected String op(){ return "sub"; }
-                    @Override public String toString(){ return pretty(op(), t, Z, R); }
+                    @Override public String toString(){ return pretty(op(), dst, Z, R); }
                 });
-                return t;
+                return dst;
             }
 
-            // ----- logical not / and / or (non–short-circuit; fine for IR & folding) -----
-         // NOT
+            // ----- logical not / and / or -----
             if (e instanceof AST.LogicalNot ln) {
                 Value R = val(ln.getExpression());
-                Variable t = newTmp();
-                cur.addInstruction(new Assign(newId(), t, R, null) {
+                cur.addInstruction(new Assign(newId(), dst, R, null) {
                     @Override protected String op(){ return "not"; }
-                    @Override public String toString(){ return pretty(op(), t, R, null); }
+                    @Override public String toString(){ return pretty(op(), dst, R, null); }
                 });
-                return t;
+                return dst;
             }
 
-            // AND
             if (e instanceof AST.LogicalAnd la) {
-                Value L = val(la.getLeft()), R = val(la.getRight());
-                Variable t = newTmp();
-                cur.addInstruction(new Assign(newId(), t, L, R) {
+                Value L = val(la.getLeft());
+                Value R = val(la.getRight());
+                cur.addInstruction(new Assign(newId(), dst, L, R) {
                     @Override protected String op(){ return "and"; }
-                    @Override public String toString(){ return pretty(op(), t, L, R); }
+                    @Override public String toString(){ return pretty(op(), dst, L, R); }
                 });
-                return t;
+                return dst;
             }
 
-            // OR
             if (e instanceof AST.LogicalOr lo) {
-                Value L = val(lo.getLeft()), R = val(lo.getRight());
-                Variable t = newTmp();
-                cur.addInstruction(new Assign(newId(), t, L, R) {
+                Value L = val(lo.getLeft());
+                Value R = val(lo.getRight());
+                cur.addInstruction(new Assign(newId(), dst, L, R) {
                     @Override protected String op(){ return "or"; }
-                    @Override public String toString(){ return pretty(op(), t, L, R); }
+                    @Override public String toString(){ return pretty(op(), dst, L, R); }
                 });
-                return t;
+                return dst;
             }
 
             // Relations
             if (e instanceof AST.Relation rel) {
-                Value L = val(rel.getLeft()), R = val(rel.getRight());
-                Variable t = newTmp();
+                Value L = val(rel.getLeft());
+                Value R = val(rel.getRight());
                 final String op = switch (rel.getOperator()) {
                     case "==" -> "cmpeq"; case "!=" -> "cmpne";
                     case "<"  -> "cmplt"; case "<=" -> "cmple";
                     case ">"  -> "cmpgt"; case ">=" -> "cmpge";
                     default -> "cmp?";
                 };
-                cur.addInstruction(new Assign(newId(), t, L, R) {
+                cur.addInstruction(new Assign(newId(), dst, L, R) {
                     @Override protected String op(){ return op; }
-                    @Override public String toString(){ return pretty(op(), t, L, R); }
+                    @Override public String toString(){ return pretty(op(), dst, L, R); }
                 });
-                return t;
+                return dst;
             }
-            
+
             // Function call
             if (e instanceof AST.FunctionCall fc) {
-                java.util.ArrayList<Value> args = new java.util.ArrayList<>();
+                ArrayList<Value> args = new ArrayList<>();
                 for (ast.Expression a : fc.getArguments().getArguments()) args.add(val(a));
-                Variable t = newTmp(); // capture return
-                cur.addInstruction(new Call(newId(), new mocha.Symbol(fc.getIdentifier().getName(), null), args, t));
-                return t;
+                // if we have a preferredDst, use it as the result variable
+                Variable callDst = (preferredDst != null) ? preferredDst : newTmp();
+                cur.addInstruction(new Call(newId(), new mocha.Symbol(fc.getIdentifier().getName(), null), args, callDst));
+                return callDst;
             }
-            // fallback
+
+            // fallback – shouldn’t normally happen
             return new Literal(e);
         }
 
@@ -1541,49 +1549,35 @@ public class Compiler {
 
         @Override
         public void visit(AST.Assignment node) {
-            if (!(node.getDestination() instanceof AST.Identifier id)) {
+            if (!(node.getDestination() instanceof AST.Identifier id))
                 throw new RuntimeException("Only simple lvalues supported in this minimal builder.");
-            }
 
             Variable dst = v(id.getName());
-            ast.Expression src = node.getSource();
 
-            // ---------- 1. Simple RHS: identifier or literal ----------
-            if (src instanceof AST.Identifier ||
-                src instanceof AST.IntegerLiteral ||
-                src instanceof AST.FloatLiteral ||
-                src instanceof AST.BoolLiteral) {
+            // Count instructions before lowering RHS
+            int before = cur.instructions().size();
 
-                Value rhs = val(src); // val() just returns a Variable or Literal here
-                cur.addInstruction(prettyAssign(newId(), dst, "mov", rhs, null));
-                return;
-            }
+            // Try to compute RHS directly into 'dst'
+            Value rhs = valInto(node.getSource(), dst);
 
-            // ---------- 2. Function call returning into dst ----------
-            if (src instanceof AST.FunctionCall fc) {
-                java.util.ArrayList<Value> args = new java.util.ArrayList<>();
-                for (ast.Expression e : fc.getArguments().getArguments()) {
-                    args.add(val(e));        // this may create temps for complex args; that's fine
+            int after = cur.instructions().size();
+
+            // If no instruction was emitted for the RHS (simple literal/var), we still
+            // need a mov dst = rhs, unless it's already the same variable.
+            if (after == before) {
+                boolean sameVar = (rhs instanceof Variable v) && v.toString().equals(dst.toString());
+                if (!sameVar) {
+                    cur.addInstruction(new Assign(newId(), dst, rhs, null) {
+                        @Override protected String op(){ return "mov"; }
+                        @Override public String toString(){ return pretty(op(), dst, rhs, null); }
+                    });
                 }
-                cur.addInstruction(new Call(
-                    newId(),
-                    new mocha.Symbol(fc.getIdentifier().getName(), null),
-                    args,
-                    dst    // return value goes directly into dst
-                ));
-                return;
             }
-
-            // ---------- 3. Fallback: original behaviour ----------
-            // For arbitrary expressions (a + b, c + d * e, relations, etc.), we go through val().
-            // This is the old safe pattern: t = <expr>; dst = mov t
-            Value rhs = val(src);
-            cur.addInstruction(prettyAssign(newId(), dst, "mov", rhs, null));
         }
 
         @Override
         public void visit(AST.FunctionCall node) {
-            java.util.ArrayList<Value> args = new java.util.ArrayList<>();
+            ArrayList<Value> args = new ArrayList<>();
             for (ast.Expression e : node.getArguments().getArguments()) args.add(val(e));
             // void call
             cur.addInstruction(new Call(newId(), new mocha.Symbol(node.getIdentifier().getName(), null), args));
@@ -1600,7 +1594,7 @@ public class Compiler {
                 @Override protected String op(){ return "test"; }
                 @Override public String toString(){
                     return "if " + cond + " goto " + thenBB.dotNodeName() +
-                            (elseBB!=null ? " else " + elseBB.dotNodeName() : " else " + joinBB.dotNodeName());
+                           (elseBB!=null ? " else " + elseBB.dotNodeName() : " else " + joinBB.dotNodeName());
                 }
             });
             cur.addSuccessor(thenBB);
@@ -1622,18 +1616,15 @@ public class Compiler {
             // continue at join
             cur = joinBB;
         }
-        
+
         @Override
         public void visit(AST.WhileStatement n) {
-            // Create the three blocks: test, body, and exit
             BasicBlock testBB = newBB();
             BasicBlock bodyBB = newBB();
             BasicBlock exitBB = newBB();
 
-            // Edge from current block into the loop test
             cur.addSuccessor(testBB);
 
-            // --- testBB: evaluate condition and branch ---
             cur = testBB;
             final Value cond = val(n.getCondition());
             cur.addInstruction(new Assign(newId(), newTmp(), cond, null) {
@@ -1642,53 +1633,44 @@ public class Compiler {
                     return "if " + cond + " goto " + bodyBB.dotNodeName() + " else " + exitBB.dotNodeName();
                 }
             });
-            cur.addSuccessor(bodyBB);  // true branch
-            cur.addSuccessor(exitBB);  // false branch
-
-            // --- bodyBB: loop body, then jump back to testBB ---
-            cur = bodyBB;
-            n.getBody().accept(this);
-            cur.addSuccessor(testBB);  // back-edge
-
-            // Continue after the loop at exitBB
-            cur = exitBB;
-        }
-        
-        @Override
-        public void visit(AST.RepeatStatement n) {
-            // blocks: body -> testJoin ; testJoin branches to body or exit
-            BasicBlock bodyBB = newBB();
-            BasicBlock testBB = newBB();
-            BasicBlock exitBB = newBB();
-
-            // current block falls into body
             cur.addSuccessor(bodyBB);
+            cur.addSuccessor(exitBB);
 
-            // --- body ---
             cur = bodyBB;
             n.getBody().accept(this);
             cur.addSuccessor(testBB);
 
-            // --- test (UNTIL cond) ---
+            cur = exitBB;
+        }
+
+        @Override
+        public void visit(AST.RepeatStatement n) {
+            BasicBlock bodyBB = newBB();
+            BasicBlock testBB = newBB();
+            BasicBlock exitBB = newBB();
+
+            cur.addSuccessor(bodyBB);
+
+            cur = bodyBB;
+            n.getBody().accept(this);
+            cur.addSuccessor(testBB);
+
             cur = testBB;
             final Value cond = val(n.getCondition());
             cur.addInstruction(new Assign(newId(), newTmp(), cond, null) {
                 @Override protected String op(){ return "test"; }
                 @Override public String toString(){
-                    // repeat ... until cond  ==  loop until cond is true (i.e., exit on true)
                     return "if " + cond + " goto " + exitBB.dotNodeName() + " else " + bodyBB.dotNodeName();
                 }
             });
-            cur.addSuccessor(exitBB);  // cond true -> exit
-            cur.addSuccessor(bodyBB);  // cond false -> repeat
+            cur.addSuccessor(exitBB);
+            cur.addSuccessor(bodyBB);
 
-            // continue after loop
             cur = exitBB;
         }
 
         @Override
         public void visit(AST.ReturnStatement n) {
-            // your AST uses getValue() (not getExpression()); keep consistent with your MiniInterpreter
             ast.Expression e = n.getValue();
             final Value v = (e != null) ? val(e) : null;
             cur.addInstruction(new Assign(newId(), newTmp(), v, null) {
@@ -1705,7 +1687,6 @@ public class Compiler {
                 @Override public String toString(){ return "<" + n.getIdentifier().getName() + ">"; }
             });
 
-            // parameters are considered initialized
             enterInitScope();
             for (AST.FormalParameter p : n.getParameters()){
                 setInit(p.getIdentifier().getName());
@@ -1714,15 +1695,23 @@ public class Compiler {
             n.getBody().getStatements().accept(this);
             exitInitScope();
         }
-        
+
         @Override
         public void visit(AST.StatementSequence node) {
             boolean root = initStack.isEmpty();
             if (root) enterInitScope();
-            for (ast.Statement s : node) if (s != null) s.accept(this);
+            for (ast.Statement s : node) {
+                if (s == null) continue;
+                s.accept(this);
+
+                // If this statement is a return, the rest of this sequence is definitely unreachable and we shouldn't emit IR for it.
+                if (s instanceof AST.ReturnStatement) {
+                    break;
+                }
+            }
             if (root) exitInitScope();
         }
-        
+
         @Override
         public void visit(AST.VariableDeclaration n) {
             String name = n.getIdentifier().getName();
@@ -1738,15 +1727,15 @@ public class Compiler {
             }
             setInit(name);
         }
-        
-        // ---- init tracking (scoped set of initialized variables)
-        private final java.util.Deque<java.util.Set<String>> initStack = new java.util.ArrayDeque<>();
-        private void enterInitScope(){ initStack.push(new java.util.HashSet<>()); }
+
+        // ---- init tracking (same as you had) ----
+        private final Deque<Set<String>> initStack = new ArrayDeque<>();
+        private void enterInitScope(){ initStack.push(new HashSet<>()); }
         private void exitInitScope(){ initStack.pop(); }
         private boolean isInit(String n){ for (var s: initStack) if (s.contains(n)) return true; return false; }
         private void setInit(String n){ if (!initStack.isEmpty()) initStack.peek().add(n); }
 
-        // no-ops for everything else
+        // no-ops for everything else...
         @Override public void visit(AST.LogicalAnd n) {}
         @Override public void visit(AST.LogicalOr n) {}
         @Override public void visit(AST.LogicalNot n) {}
@@ -1767,7 +1756,6 @@ public class Compiler {
         @Override public void visit(AST.FloatLiteral n) {}
         @Override public void visit(AST.IntegerLiteral n) {}
         @Override public void visit(AST.BoolLiteral n) {}
-   
     }
 
     /** Run selected optimizations and return DOT text of the resulting IR. */
