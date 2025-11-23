@@ -1145,14 +1145,21 @@ public class Compiler {
 //        
         lastPostDot = currentIR.asDotGraph(); // After Optimization
         
-////        //Register allocation hook 
-//        LinearScanAllocator alloc = new LinearScanAllocator(numDataRegisters);
-//        LinearScanAllocator.Result map = alloc.allocate(currentIR.blocks());
-//        alloc.rewrite(currentIR.blocks(), map);
-//        
-//        removeSillyMoves(currentIR.blocks());
         
 	    return currentIR;
+    }
+    
+    private void allocateRegisters(List<BasicBlock> blocks) {
+        if (blocks == null || blocks.isEmpty()) return;
+
+        //System.err.println("RA: running register allocation on " + blocks.size() + " blocks"); // Use only if you are not getting desired output
+
+        Map<String,Set<String>> ig = buildInterferenceGraph(blocks);
+        RegAllocResult res = colorGraph(ig, numDataRegisters);
+        //System.err.println("RA: colors = " + res.colors);
+        //System.err.println("RA: spilled = " + res.spilled);
+        rewriteWithRegisters(blocks, res.colors, res.spilled);
+        removeSillyMoves(blocks);
     }
     
     private static final class CFGSimplifier {
@@ -1266,7 +1273,89 @@ public class Compiler {
     	    }
     	  } while (changed);
     	}
- 
+    
+    //PA5
+    
+    // Remove silly moves like  R5 = R5  after register allocation.
+    private static void removeSillyMoves(List<BasicBlock> blocks) {
+        if (blocks == null) return;
+
+        for (BasicBlock b : blocks) {
+            List<ir.tac.TAC> ins = b.instructions();
+            if (ins == null || ins.isEmpty()) continue;
+
+            for (Iterator<ir.tac.TAC> it = ins.iterator(); it.hasNext(); ) {
+                ir.tac.TAC t = it.next();
+                if (t instanceof ir.tac.Assign a) {
+                    if (!"mov".equals(a.opcode())) continue;
+
+                    ir.tac.Value src = a.left();
+                    ir.tac.Variable dst = a.dest();
+                    if (src instanceof ir.tac.Variable v && dst != null) {
+                        if (v.toString().equals(dst.toString())) {
+                            // e.g. R3 = R3  → useless
+                            it.remove();
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    // Result of register allocation
+    private static final class RegAllocResult {
+        final Map<String,Integer> colors;  // var -> register index [0..K-1]
+        final Set<String> spilled;        // vars that could not get a color
+
+        RegAllocResult(Map<String,Integer> c, Set<String> s) {
+            this.colors = c;
+            this.spilled = s;
+        }
+    }
+    
+ // Collect variable *names* used by a TAC
+    private static Set<String> usedVars(ir.tac.TAC t) {
+        Set<String> u = new HashSet<>();
+
+        if (t instanceof ir.tac.Assign a) {
+            String op = a.opcode();
+            // label has no data uses
+            if ("label".equals(op)) return u;
+
+            // test and ret only use the left operand
+            if ("test".equals(op) || "ret".equals(op)) {
+                if (a.left() instanceof ir.tac.Variable v) u.add(v.toString());
+                return u;
+            }
+
+            if (a.left() instanceof ir.tac.Variable v1)  u.add(v1.toString());
+            if (a.right() instanceof ir.tac.Variable v2) u.add(v2.toString());
+        } else if (t instanceof ir.tac.Call c) {
+            if (c.args() != null) {
+                for (ir.tac.Value v : c.args()) {
+                    if (v instanceof ir.tac.Variable var) u.add(var.toString());
+                }
+            }
+        }
+        return u;
+    }
+
+    // Single defined variable name for a TAC (or null)
+    private static String defVar(ir.tac.TAC t) {
+        if (t instanceof ir.tac.Assign a) {
+            String op = a.opcode();
+            // structural ops don't define a register
+            if ("label".equals(op) || "test".equals(op) || "ret".equals(op)) return null;
+            ir.tac.Variable dst = a.dest();
+            return (dst == null) ? null : dst.toString();
+        }
+        if (t instanceof ir.tac.Call c) {
+            ir.tac.Variable dst = c.dest();
+            return (dst == null) ? null : dst.toString();
+        }
+        return null;
+    }
+    
     
     private static class NodeVisitorAdapter implements ast.NodeVisitor {
         // literals / ids
@@ -1768,22 +1857,33 @@ public class Compiler {
 
     List<String> plan;
     if (realMax) {
-        // True "max" pipeline: no -o flags, but -max was (implicitly) requested
-        plan = Arrays.asList("cp","cf","cse","dce","cfg","ofe","merge");
+        // Max pipeline: include RA at the very end
+        plan = Arrays.asList("cp","cf","cse","dce","cfg","ofe","merge","ra");
     } else if (opts != null && !opts.isEmpty()) {
-        // Explicit -o sequence: honor user order, ignore bogus 'max'
+        // Explicit -o sequence: honor user order
         plan = new ArrayList<>(opts);
     } else {
         // No -max, no -o → no optimizations
         plan = Collections.emptyList();
     }
 
+    // Split into "loopable" passes and "ra" (non-loop)
+    List<String> prePasses = new ArrayList<>();
+    boolean doRA = false;
+    for (String p : plan) {
+        if ("ra".equalsIgnoreCase(p)) {
+            doRA = true;
+        } else {
+            prePasses.add(p.toLowerCase());
+        }
+    }
+
     String prev;
     do {
         prev = currentIR.asDotGraph();
 
-        for (String p : plan) {
-            switch (p.toLowerCase()) {
+        for (String p : prePasses) {
+            switch (p) {
                 case "cp":
                     new Optimizer(true,  false, false, false).optimize(currentIR.blocks());
                     break;
@@ -1809,12 +1909,273 @@ public class Compiler {
                     break;
             }
         }
-        // Loop to convergence only if 'loop' parameter is true
-    } while (loop && !currentIR.asDotGraph().equals(prev));
+	      // Loop to convergence only if 'loop' parameter is true
+	    } while (loop && !currentIR.asDotGraph().equals(prev));
+	
+	    // Run RA exactly once at the end, outside the convergence loop
+	    if (doRA) {
+	        allocateRegisters(currentIR.blocks());
+	    }
+	
+	    lastPostDot = currentIR.asDotGraph();
+	    return lastPostDot;
+	}
+    
+    //PA5
+    //Graph coloring
+    // Build interference graph via global liveness analysis
+    private static Map<String,Set<String>> buildInterferenceGraph(List<BasicBlock> blocks) {
+        Map<BasicBlock,Set<String>> useB = new HashMap<>();
+        Map<BasicBlock,Set<String>> defB = new HashMap<>();
 
-    lastPostDot = currentIR.asDotGraph();
-    return lastPostDot;
-}
+        // 1) Per-block use/def
+        for (BasicBlock b : blocks) {
+            Set<String> use = new HashSet<>();
+            Set<String> def = new HashSet<>();
+            List<ir.tac.TAC> ins = b.instructions();
+            if (ins != null) {
+                for (ir.tac.TAC t : ins) {
+                    Set<String> used = usedVars(t);
+                    String defv = defVar(t);
+
+                    // vars used before defined in this block go into useB
+                    for (String v : used) {
+                        if (!def.contains(v)) use.add(v);
+                    }
+                    if (defv != null) def.add(defv);
+                }
+            }
+            useB.put(b, use);
+            defB.put(b, def);
+        }
+
+        // 2) Solve dataflow for live-in/live-out
+        Map<BasicBlock,Set<String>> in  = new HashMap<>();
+        Map<BasicBlock,Set<String>> out = new HashMap<>();
+        for (BasicBlock b : blocks) {
+            in.put(b,  new HashSet<>());
+            out.put(b, new HashSet<>());
+        }
+
+        boolean changed;
+        do {
+            changed = false;
+            // backwards is nice but not required
+            ListIterator<BasicBlock> it = blocks.listIterator(blocks.size());
+            while (it.hasPrevious()) {
+                BasicBlock b = it.previous();
+                Set<String> inOld  = in.get(b);
+                Set<String> outOld = out.get(b);
+
+                // out[b] = ⋃ in[s] over succs
+                Set<String> outNew = new HashSet<>();
+                List<BasicBlock> succs = b.succs();
+                if (succs != null) {
+                    for (BasicBlock s : succs) {
+                        Set<String> inS = in.get(s);
+                        if (inS != null) outNew.addAll(inS);
+                    }
+                }
+
+                // in[b] = use[b] ∪ (out[b] − def[b])
+                Set<String> inNew = new HashSet<>(useB.get(b));
+                Set<String> tmp = new HashSet<>(outNew);
+                tmp.removeAll(defB.get(b));
+                inNew.addAll(tmp);
+
+                if (!inNew.equals(inOld) || !outNew.equals(outOld)) {
+                    in.put(b, inNew);
+                    out.put(b, outNew);
+                    changed = true;
+                }
+            }
+        } while (changed);
+
+        // 3) Build interference graph from per-instruction liveness
+        Map<String,Set<String>> graph = new HashMap<>();
+        java.util.function.Consumer<String> ensure =
+            v -> graph.computeIfAbsent(v, k -> new HashSet<>());
+
+        for (BasicBlock b : blocks) {
+            List<ir.tac.TAC> ins = b.instructions();
+            if (ins == null || ins.isEmpty()) continue;
+
+            Set<String> live = new HashSet<>(out.get(b));
+
+            for (int i = ins.size() - 1; i >= 0; --i) {
+                ir.tac.TAC t = ins.get(i);
+                Set<String> used = usedVars(t);
+                String defv = defVar(t);
+
+                // connect def with everything live-after
+                if (defv != null) {
+                    ensure.accept(defv);
+                    for (String v : live) {
+                        if (v.equals(defv)) continue;
+                        ensure.accept(v);
+                        graph.get(defv).add(v);
+                        graph.get(v).add(defv);
+                    }
+                    live.remove(defv);
+                }
+
+                // live-before = used ∪ (live-after − def)
+                live.addAll(used);
+
+                // ensure used-only vars show up as nodes
+                for (String v : used) ensure.accept(v);
+            }
+        }
+
+        return graph;
+    }
+    
+    // Chaitin-style simplification + selection
+    private static RegAllocResult colorGraph(Map<String,Set<String>> graph, int K) {
+        // Working copy
+        Map<String,Set<String>> work = new HashMap<>();
+        for (var e : graph.entrySet()) {
+            work.put(e.getKey(), new HashSet<>(e.getValue()));
+        }
+
+        List<String> stack = new ArrayList<>();
+        Set<String> spilled = new HashSet<>();
+
+        // Simplify
+        while (!work.isEmpty()) {
+            String low = null;
+
+            for (var e : work.entrySet()) {
+                if (e.getValue().size() < K) {
+                    low = e.getKey();
+                    break;
+                }
+            }
+
+            String n;
+            if (low != null) {
+                n = low;
+            } else {
+                // spill candidate: highest degree
+                n = null;
+                int best = -1;
+                for (var e : work.entrySet()) {
+                    int d = e.getValue().size();
+                    if (d > best) {
+                        best = d;
+                        n = e.getKey();
+                    }
+                }
+                if (n != null) spilled.add(n);
+            }
+
+            Set<String> neigh = work.remove(n);
+            if (neigh != null) {
+                for (String m : neigh) {
+                    Set<String> s = work.get(m);
+                    if (s != null) s.remove(n);
+                }
+            }
+            stack.add(n);
+        }
+
+        // Select colors
+        Map<String,Integer> color = new HashMap<>();
+
+        while (!stack.isEmpty()) {
+            String n = stack.remove(stack.size() - 1);
+            Set<Integer> used = new HashSet<>();
+
+            for (String m : graph.getOrDefault(n, Collections.emptySet())) {
+                Integer c = color.get(m);
+                if (c != null) used.add(c);
+            }
+
+            int chosen = -1;
+            for (int c = 0; c < K; c++) {
+                if (!used.contains(c)) {
+                    chosen = c;
+                    break;
+                }
+            }
+
+            if (chosen >= 0) {
+                color.put(n, chosen);
+            } else {
+                spilled.add(n);
+            }
+        }
+
+        return new RegAllocResult(color, spilled);
+    }
+    
+    
+	private static ir.tac.Variable rewriteVar(ir.tac.Variable v, Map<String,Integer> colors, Set<String> spilled) {
+	if (v == null) return null;
+	String name = v.toString();
+	
+	if (colors.containsKey(name)) {
+	int c = colors.get(name);
+	return new ir.tac.Variable(new mocha.Symbol("R" + c, null));
+	}
+	if (spilled.contains(name)) {
+	// "Virtual register in memory" – just tag it so we can see it
+	return new ir.tac.Variable(new mocha.Symbol("M_" + name, null));
+	}
+	return v;
+	}
+	
+	private static ir.tac.Value rewriteVal(ir.tac.Value val,
+	         Map<String,Integer> colors,
+	         Set<String> spilled) {
+	if (val instanceof ir.tac.Variable v) {
+	return rewriteVar(v, colors, spilled);
+	}
+	return val;
+	}
+	
+	private static void rewriteWithRegisters(List<BasicBlock> blocks,  Map<String,Integer> colors, Set<String> spilled) {
+	for (BasicBlock b : blocks) {
+	List<ir.tac.TAC> ins = b.instructions();
+	if (ins == null || ins.isEmpty()) continue;
+	
+	List<ir.tac.TAC> out = new ArrayList<>();
+	
+	for (ir.tac.TAC t : ins) {
+	if (t instanceof ir.tac.Assign a) {
+	String op = a.opcode();
+	ir.tac.Variable dst = rewriteVar(a.dest(), colors, spilled);
+	ir.tac.Value L = rewriteVal(a.left(),  colors, spilled);
+	ir.tac.Value R = rewriteVal(a.right(), colors, spilled);
+	
+	// keep label/test/ret behaviour from prettyAssign()
+	out.add(prettyAssign(a.id(), dst, op, L, R));
+	} else if (t instanceof ir.tac.Call c) {
+	ir.tac.Variable dst = rewriteVar(c.dest(), colors, spilled);
+	List<ir.tac.Value> newArgs = null;
+	if (c.args() != null) {
+	newArgs = new ArrayList<>();
+	for (ir.tac.Value v : c.args()) {
+	newArgs.add(rewriteVal(v, colors, spilled));
+	}
+	}
+	ir.tac.Call nc;
+	if (dst != null) {
+	nc = new ir.tac.Call(c.id(), c.function(), newArgs, dst);
+	} else {
+	nc = new ir.tac.Call(c.id(), c.function(), newArgs);
+	}
+	out.add(nc);
+	} else {
+	out.add(t);
+	}
+	}
+	
+	ins.clear();
+	ins.addAll(out);
+	}
+	}
+
     
  // ---------- Minimal interpreter for the I/O test ----------
     	private static final class MiniInterpreter implements ast.NodeVisitor {
