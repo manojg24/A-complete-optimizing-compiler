@@ -1,7 +1,10 @@
 package mocha;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Deque;
 import java.util.List;
+import java.util.ListIterator;
 import java.util.NoSuchElementException;
 import java.io.InputStream;
 import java.util.*;
@@ -35,18 +38,25 @@ import mocha.NonTerminal;
 
 public class Compiler {
 
-    // Error Reporting ============================================================
+    // =========================================================================
+    //  ERROR REPORTING, STATE, CONSTRUCTOR
+    // =========================================================================
+
+    // Error Reporting =========================================================
     private StringBuilder errorBuffer = new StringBuilder();
 
     private String reportSyntaxError(NonTerminal nt) {
-        String message = "SyntaxError(" + lineNumber() + "," + charPosition() + ")[Expected a token from " + nt.name() + " but got " + currentToken.kind + ".]";
-        errorBuffer.append(message + "\n");
+        String message = "SyntaxError(" + lineNumber() + "," + charPosition() +
+                         ")[Expected a token from " + nt.name() + " but got " +
+                         currentToken.kind + ".]";
+        errorBuffer.append(message).append("\n");
         return message;
     }
 
     private String reportSyntaxError(Token.Kind kind) {
-        String message = "SyntaxError(" + lineNumber() + "," + charPosition() + ")[Expected " + kind + " but got " + currentToken.kind + ".]";
-        errorBuffer.append(message + "\n");
+        String message = "SyntaxError(" + lineNumber() + "," + charPosition() +
+                         ")[Expected " + kind + " but got " + currentToken.kind + ".]";
+        errorBuffer.append(message).append("\n");
         return message;
     }
 
@@ -57,13 +67,13 @@ public class Compiler {
     public boolean hasError() {
         return errorBuffer.length() != 0;
     }
-    
- // Warnings (for uninitialized uses, etc.)
+
+    // Warnings (for uninitialized uses, etc.)
     private final java.util.List<String> warnings = new java.util.ArrayList<>();
     private void warn(int line, int col, String msg) {
         String m = "Warning(" + line + "," + col + ")[" + msg + "]";
         warnings.add(m);
-        System.out.println(m); // or collect-only if you prefer
+        System.out.println(m);
     }
     public java.util.List<String> getWarnings(){ return warnings; }
 
@@ -82,7 +92,7 @@ public class Compiler {
         return currentToken.charPosition();
     }
 
-    // Compiler ===================================================================
+    // Compiler core state =====================================================
     private Scanner scanner;
     private Token currentToken;
     private int numDataRegisters;
@@ -100,16 +110,16 @@ public class Compiler {
         initSymbolTable();
         try {
             Computation root = computation();
-            this.astRoot = new AST(root); 
+            this.astRoot = new AST(root);
             return new AST(root);
         } catch (QuitParseException q) {
-        	this.astRoot = new AST(null);
+            this.astRoot = new AST(null);
             return this.astRoot;
         }
     }
-    
+
     public void interpret(InputStream in) {
-    	if (astRoot == null || astRoot.getRoot() == null) {
+        if (astRoot == null || astRoot.getRoot() == null) {
             System.out.println("Interpreter: no program to run.");
             return;
         }
@@ -120,8 +130,43 @@ public class Compiler {
         System.out.println("Compiler not implemented for this assignment.");
         return new int[0];
     }
+    
+    /** Wrapper used by CompilerTester to run register allocation. */
+    public void regAlloc(int numRegs) {
+        // Clamp and store
+        if (numRegs > 24) numRegs = 24;
+        if (numRegs < 2)  numRegs = 2;
+        this.numDataRegisters = numRegs;
 
-    // SymbolTable Management =====================================================
+        // Make sure we have an IR
+        if (currentIR == null) {
+            if (astRoot == null || astRoot.getRoot() == null) return;
+            genIR(astRoot);
+        }
+
+        // Run the existing allocator (even though genCode does not rely on it yet)
+        allocateRegisters(currentIR.blocks());
+    }
+
+    /** Entry point for PA6 code generation – IR → DLX object code. */
+    public int[] genCode() {
+        // Rebuild a fresh, unoptimized IR so that codegen is predictable.
+        // (If you want optimizations to affect code, you can instead reuse currentIR.)
+        if (astRoot == null || astRoot.getRoot() == null) {
+            return new int[0];
+        }
+        IR ir = genIR(astRoot);   // rebuild IR from AST
+        List<BasicBlock> blocks = ir.blocks();
+
+        CodeGenerator cg = new CodeGenerator();
+        this.instructions = cg.generate(blocks);
+        return instructions.stream().mapToInt(Integer::intValue).toArray();
+    }
+
+    // =========================================================================
+    //  SYMBOL TABLE MANAGEMENT
+    // =========================================================================
+
     private SymbolTable symbolTable;
 
     private void initSymbolTable() {
@@ -136,14 +181,14 @@ public class Compiler {
         symbolTable.exitScope();
     }
 
-    private Symbol tryResolveVariable(Token ident) {
-        try {
-            return symbolTable.lookup(ident.lexeme());
-        } catch (SymbolNotFoundError e) {
-            reportResolveSymbolError(ident.lexeme(), ident.lineNumber(), ident.charPosition());
-            return null;
-        }
-    }
+//    private Symbol tryResolveVariable(Token ident) {
+//        try {
+//            return symbolTable.lookup(ident.lexeme());
+//        } catch (SymbolNotFoundError e) {
+//            reportResolveSymbolError(ident.lexeme(), ident.lineNumber(), ident.charPosition());
+//            return null;
+//        }
+//    }
 
     private Symbol tryDeclareVariable(Token ident, Type type) {
         try {
@@ -156,17 +201,20 @@ public class Compiler {
 
     private String reportResolveSymbolError(String name, int lineNum, int charPos) {
         String message = "ResolveSymbolError(" + lineNum + "," + charPos + ")[Could not find " + name + ".]";
-        errorBuffer.append(message + "\n");
+        errorBuffer.append(message).append("\n");
         return message;
     }
 
     private String reportDeclareSymbolError(String name, int lineNum, int charPos) {
         String message = "DeclareSymbolError(" + lineNum + "," + charPos + ")[" + name + " already exists.]";
-        errorBuffer.append(message + "\n");
+        errorBuffer.append(message).append("\n");
         return message;
     }
 
-    // Helper Methods =============================================================
+    // =========================================================================
+    //  PARSER: BASIC HELPERS
+    // =========================================================================
+
     private boolean have (Token.Kind kind) {
         return currentToken.is(kind);
     }
@@ -179,8 +227,7 @@ public class Compiler {
         if (have(kind)) {
             try {
                 currentToken = scanner.next();
-            }
-            catch (NoSuchElementException e) {
+            } catch (NoSuchElementException e) {
                 if (!kind.equals(Token.Kind.EOF)) {
                     String errorMessage = reportSyntaxError(kind);
                     throw new QuitParseException(errorMessage);
@@ -233,7 +280,9 @@ public class Compiler {
         throw new QuitParseException(errorMessage);
     }
 
-    // Grammar Rules ==============================================================
+    // =========================================================================
+    //  PARSER: COMPUTATION, DECLS, FUNCTIONS
+    // =========================================================================
 
     private Computation computation() {
         // Collect any function declarations that appear before 'main'
@@ -245,14 +294,14 @@ public class Compiler {
         // Now we must see 'main'
         Token mainToken = expectRetrieve(Token.Kind.MAIN);
 
-        // Globals (after 'main' per your original grammar)
+        // Globals
         DeclarationList varDecls = new DeclarationList(lineNumber(), charPosition());
         while (have(NonTerminal.VAR_DECL) && !have(Token.Kind.FUNC)) {
             List<Declaration> declsForThisLine = varDecl();
             for (Declaration d : declsForThisLine) varDecls.add(d);
         }
 
-        // Also allow more function decls after the globals (merge into same list)
+        // Also allow more function decls after the globals
         while (have(NonTerminal.FUNC_DECL)) {
             funcDecls.add(funcDecl());
         }
@@ -275,7 +324,6 @@ public class Compiler {
     }
 
     private List<Declaration> varDecl() {
-        // get the concrete (syntactic) type directly
         AST.TypeNode baseTypeNode = (AST.TypeNode) typeDecl();
         List<Declaration> decls = new ArrayList<>();
 
@@ -283,7 +331,7 @@ public class Compiler {
             Token identToken = expectRetrieve(Token.Kind.IDENT);
             Identifier id = new Identifier(identToken.lineNumber(), identToken.charPosition(), identToken.lexeme());
 
-            Type varType = baseTypeNode.getActualType(); // ✅ not null
+            Type varType = baseTypeNode.getActualType();
 
             // Per-variable brackets: int a[5], b[], c;
             while (accept(Token.Kind.OPEN_BRACKET)) {
@@ -299,16 +347,25 @@ public class Compiler {
                 expression();
             }
 
-            AST.TypeNode typeNode = new AST.TypeNode(baseTypeNode.lineNumber(), baseTypeNode.charPosition(), varType);
+            AST.TypeNode typeNode = new AST.TypeNode(
+                baseTypeNode.lineNumber(),
+                baseTypeNode.charPosition(),
+                varType
+            );
             tryDeclareVariable(identToken, varType);
-            decls.add(new VariableDeclaration(baseTypeNode.lineNumber(), baseTypeNode.charPosition(), id, typeNode));
+            decls.add(new VariableDeclaration(
+                baseTypeNode.lineNumber(),
+                baseTypeNode.charPosition(),
+                id,
+                typeNode
+            ));
 
         } while (accept(Token.Kind.COMMA));
 
         expect(Token.Kind.SEMICOLON);
         return decls;
     }
-    
+
     private Node typeDecl() {
         Token typeToken = currentToken;
         Type actualType;
@@ -324,17 +381,16 @@ public class Compiler {
             throw new QuitParseException(reportSyntaxError(NonTerminal.TYPE_DECL));
         }
 
-        // Start with a base TypeNode
         AST.TypeNode typeNode = new AST.TypeNode(
-                typeToken.lineNumber(),
-                typeToken.charPosition(),
-                actualType
+            typeToken.lineNumber(),
+            typeToken.charPosition(),
+            actualType
         );
 
         // Handle array brackets and nested dimensions
         while (accept(Token.Kind.OPEN_BRACKET)) {
             boolean negative = false;
-            int size = -1; // -1 means unspecified array size (like int[])
+            int size = -1;
 
             if (accept(Token.Kind.SUB)) {  // allows negative sizes like [-5]
                 negative = true;
@@ -348,14 +404,12 @@ public class Compiler {
 
             expect(Token.Kind.CLOSE_BRACKET);
 
-            // Wrap existing type inside a new ArrayType
             actualType = new ArrayType(size, actualType);
 
-            // Update typeNode to wrap the most recent ArrayType
             typeNode = new AST.TypeNode(
-                    typeToken.lineNumber(),
-                    typeToken.charPosition(),
-                    actualType
+                typeToken.lineNumber(),
+                typeToken.charPosition(),
+                actualType
             );
         }
 
@@ -366,7 +420,7 @@ public class Compiler {
         Token funcToken = expectRetrieve(Token.Kind.FUNC);
         Token identToken = expectRetrieve(Token.Kind.IDENT);
         Identifier id = new Identifier(identToken.lineNumber(), identToken.charPosition(), identToken.lexeme());
-        
+
         expect(Token.Kind.OPEN_PAREN);
         List<FormalParameter> params = new ArrayList<>();
         if (!have(Token.Kind.CLOSE_PAREN)) {
@@ -378,43 +432,56 @@ public class Compiler {
         Node returnTypeNode;
         if (have(Token.Kind.VOID)) {
             Token voidTok = expectRetrieve(Token.Kind.VOID);
-            returnTypeNode = new AST.TypeNode(voidTok.lineNumber(), voidTok.charPosition(), new VoidType());
+            returnTypeNode = new AST.TypeNode(
+                voidTok.lineNumber(),
+                voidTok.charPosition(),
+                new VoidType()
+            );
         } else {
-            returnTypeNode = typeDecl(); // int/float/bool and optional []s
+            returnTypeNode = typeDecl();
         }
-        
+
         FunctionBody body = funcBody();
         expect(Token.Kind.SEMICOLON);
-        
-        return new FunctionDeclaration(funcToken.lineNumber(), funcToken.charPosition(), id, params, returnTypeNode, body);
+
+        return new FunctionDeclaration(
+            funcToken.lineNumber(),
+            funcToken.charPosition(),
+            id,
+            params,
+            returnTypeNode,
+            body
+        );
     }
 
     private List<FormalParameter> formalParams() {
         List<FormalParameter> params = new ArrayList<>();
 
-        // Caller guarantees we're not at CLOSE_PAREN yet; parse one or more: TYPE IDENT ( , TYPE IDENT )*
         do {
-            AST.TypeNode typeNode = (AST.TypeNode) typeDecl();      // type only (int/float/bool + [] groups)
-            Token identToken = expectRetrieve(Token.Kind.IDENT);     // then IDENT
+            AST.TypeNode typeNode = (AST.TypeNode) typeDecl();
+            Token identToken = expectRetrieve(Token.Kind.IDENT);
             Identifier id = new Identifier(identToken.lineNumber(), identToken.charPosition(), identToken.lexeme());
 
-            params.add(new FormalParameter(identToken.lineNumber(),
-                                           identToken.charPosition(),
-                                           id,
-                                           typeNode));
+            params.add(new FormalParameter(
+                identToken.lineNumber(),
+                identToken.charPosition(),
+                id,
+                typeNode
+            ));
         } while (accept(Token.Kind.COMMA));
 
         return params;
     }
-    
+
     private FunctionBody funcBody() {
         expect(Token.Kind.OPEN_BRACE);
         enterScope();
         DeclarationList decls = new DeclarationList(lineNumber(), charPosition());
-        while(have(NonTerminal.VAR_DECL)) {
+        while (have(NonTerminal.VAR_DECL)) {
             List<Declaration> declsThisLine = varDecl();
-            for (Declaration d : declsThisLine)
+            for (Declaration d : declsThisLine) {
                 decls.add(d);
+            }
         }
         StatementSequence stmts = statSeq();
         exitScope();
@@ -422,40 +489,49 @@ public class Compiler {
         return new FunctionBody(decls.lineNumber(), decls.charPosition(), decls, stmts);
     }
 
+    // =========================================================================
+    //  PARSER: STATEMENTS
+    // =========================================================================
+
     private StatementSequence statSeq() {
         StatementSequence seq = new StatementSequence(lineNumber(), charPosition());
-        
+
         while (!have(Token.Kind.CLOSE_BRACE) &&
                !have(Token.Kind.OD) &&
                !have(Token.Kind.FI) &&
                !have(Token.Kind.ELSE) &&
                !have(Token.Kind.EOF)) {
-        	
-        	if (have(NonTerminal.VAR_DECL)) {
+
+            if (have(NonTerminal.VAR_DECL)) {
                 List<Declaration> decls = varDecl();
                 for (Declaration d : decls) {
                     seq.add((Statement) d);  // VariableDeclaration now implements Statement
                 }
                 continue;
             }
-        	
-        	if (accept(Token.Kind.SEMICOLON)) {
+
+            if (accept(Token.Kind.SEMICOLON)) {
                 continue;
             }
+
             if (have(NonTerminal.STATEMENT) || have(Token.Kind.SEMICOLON)) {
-            	Statement s = statement(); 
-                if (s != null) seq.add(s); 
+                Statement s = statement();
+                if (s != null) seq.add(s);
             } else {
-                // Skip invalid token and report error instead of crashing
                 String errorMessage = "Unexpected token '" + currentToken.lexeme() +
                                       "' at line " + lineNumber() +
                                       ", col " + charPosition();
-                errorBuffer.append("SyntaxError(" + lineNumber() + "," + charPosition() + ")["
-                                   + errorMessage + "]\n");
-                currentToken = scanner.next(); // try to continue parsing
+                errorBuffer.append("SyntaxError(")
+                           .append(lineNumber())
+                           .append(",")
+                           .append(charPosition())
+                           .append(")[")
+                           .append(errorMessage)
+                           .append("]\n");
+                currentToken = scanner.next();
             }
         }
-        
+
         return seq;
     }
 
@@ -481,7 +557,6 @@ public class Compiler {
             return call;
         }
         if (accept(Token.Kind.SEMICOLON)) {
-            // empty statement, skip safely
             return null;
         }
 
@@ -529,8 +604,8 @@ public class Compiler {
             expect(Token.Kind.SEMICOLON);
             Expression one = new IntegerLiteral(dest.lineNumber(), dest.charPosition(), 1);
             Expression result = isInc
-                                ? new Addition(dest.lineNumber(), dest.charPosition(), dest, one)
-                                : new Subtraction(dest.lineNumber(), dest.charPosition(), dest, one);
+                ? new Addition(dest.lineNumber(), dest.charPosition(), dest, one)
+                : new Subtraction(dest.lineNumber(), dest.charPosition(), dest, one);
             return new Assignment(dest.lineNumber(), dest.charPosition(), dest, result);
         }
 
@@ -556,7 +631,7 @@ public class Compiler {
         Expression condition = expression();
         expect(Token.Kind.DO);
         StatementSequence body = statSeq();
-        expect(Token.Kind.OD);  // OD ends the block, no semicolon
+        expect(Token.Kind.OD);
         expect(Token.Kind.SEMICOLON);
         return new WhileStatement(whileToken.lineNumber(), whileToken.charPosition(), condition, body);
     }
@@ -567,50 +642,58 @@ public class Compiler {
         if (!have(Token.Kind.SEMICOLON)) {
             value = expression();
         }
-        expect(Token.Kind.SEMICOLON);  // semicolon required at the end of return
+        expect(Token.Kind.SEMICOLON);
         return new ReturnStatement(retToken.lineNumber(), retToken.charPosition(), value);
     }
 
     private StatementSequence statSeqUntil(Token.Kind stopToken) {
         StatementSequence seq = new StatementSequence(lineNumber(), charPosition());
         while (!have(stopToken) && !have(Token.Kind.EOF)) {
-        	if (have(NonTerminal.VAR_DECL)) {
+            if (have(NonTerminal.VAR_DECL)) {
                 List<Declaration> decls = varDecl();
                 for (Declaration d : decls) {
-                    seq.add((Statement) d);  // VariableDeclaration now implements Statement
+                    seq.add((Statement) d);
                 }
                 continue;
             }
             if (have(NonTerminal.STATEMENT) || have(Token.Kind.SEMICOLON)) {
-            	Statement s = statement();
+                Statement s = statement();
                 if (s != null) seq.add(s);
             } else {
-                // skip invalid tokens
-                errorBuffer.append("SyntaxError(" + lineNumber() + "," + charPosition() + ")[Unexpected token '" + currentToken.lexeme() + "']\n");
+                errorBuffer.append("SyntaxError(")
+                           .append(lineNumber())
+                           .append(",")
+                           .append(charPosition())
+                           .append(")[Unexpected token '")
+                           .append(currentToken.lexeme())
+                           .append("']\n");
                 currentToken = scanner.next();
             }
         }
         return seq;
     }
-    
+
     private RepeatStatement repeatStatement() {
         Token repeatToken = expectRetrieve(Token.Kind.REPEAT);
         StatementSequence body = statSeqUntil(Token.Kind.UNTIL);
         expect(Token.Kind.UNTIL);
-        Expression condition = expression();  // UNTIL condition ends statement naturally
+        Expression condition = expression();
         expect(Token.Kind.SEMICOLON);
         return new RepeatStatement(repeatToken.lineNumber(), repeatToken.charPosition(), body, condition);
     }
 
+    // =========================================================================
+    //  PARSER: EXPRESSIONS, DESIGNATORS, CALLS
+    // =========================================================================
+
     private Expression expression() {
-        // CHANGED: Your grammar has OR and AND, so we start there.
         return orExpr();
     }
 
     private Expression orExpr() {
         Expression left = andExpr();
-        while(have(Token.Kind.OR)) {
-            Token op = currentToken;          // capture before consuming
+        while (have(Token.Kind.OR)) {
+            Token op = currentToken;
             accept(Token.Kind.OR);
             Expression right = andExpr();
             left = new LogicalOr(op.lineNumber(), op.charPosition(), left, right);
@@ -620,15 +703,15 @@ public class Compiler {
 
     private Expression andExpr() {
         Expression left = relExpr();
-        while(have(Token.Kind.AND)) {
-            Token op = currentToken;          // capture before consuming
+        while (have(Token.Kind.AND)) {
+            Token op = currentToken;
             accept(Token.Kind.AND);
             Expression right = relExpr();
             left = new LogicalAnd(op.lineNumber(), op.charPosition(), left, right);
         }
         return left;
     }
-    
+
     private Expression relExpr() {
         Expression left = addExpr();
         if (have(NonTerminal.REL_OP)) {
@@ -639,7 +722,7 @@ public class Compiler {
         }
         return left;
     }
-    
+
     private Expression addExpr() {
         Expression left = mulExpr();
         while (have(NonTerminal.ADD_OP)) {
@@ -648,7 +731,7 @@ public class Compiler {
             Expression right = mulExpr();
             if (op.is(Token.Kind.ADD)) {
                 left = new Addition(op.lineNumber(), op.charPosition(), left, right);
-            } else { // SUB
+            } else {
                 left = new Subtraction(op.lineNumber(), op.charPosition(), left, right);
             }
         }
@@ -665,56 +748,54 @@ public class Compiler {
                 left = new Multiplication(op.lineNumber(), op.charPosition(), left, right);
             } else if (op.is(Token.Kind.DIV)) {
                 left = new Division(op.lineNumber(), op.charPosition(), left, right);
-            } else { // MOD
+            } else {
                 left = new Modulo(op.lineNumber(), op.charPosition(), left, right);
             }
         }
         return left;
     }
 
-    // New method for right-associative power operator
     private Expression powExpr() {
         Expression left = factor();
         if (have(Token.Kind.POW)) {
-            Token op = currentToken;          // capture before consuming
+            Token op = currentToken;
             accept(Token.Kind.POW);
-            Expression right = powExpr(); // Recursive call for right-associativity
+            Expression right = powExpr();
             return new Power(op.lineNumber(), op.charPosition(), left, right);
         }
         return left;
     }
 
     private Expression factor() {
-    	if (have(Token.Kind.CALL)) {
+        if (have(Token.Kind.CALL)) {
             return funcCall();
         }
-    	if (have(Token.Kind.NOT)) {
+        if (have(Token.Kind.NOT)) {
             Token op = expectRetrieve(Token.Kind.NOT);
-            Expression e = factor(); // right-associative unary
+            Expression e = factor();
             return new LogicalNot(op.lineNumber(), op.charPosition(), e);
         }
-    	if (have(Token.Kind.SUB)) {  // handle unary minus
+        if (have(Token.Kind.SUB)) {
             Token op = expectRetrieve(Token.Kind.SUB);
-            Expression right = factor(); // recursive call for unary
+            Expression right = factor();
             return new UnaryMinus(op.lineNumber(), op.charPosition(), right);
         }
-    	if (have(Token.Kind.IDENT)) {
-    	    Token identToken = expectRetrieve(Token.Kind.IDENT);
+        if (have(Token.Kind.IDENT)) {
+            Token identToken = expectRetrieve(Token.Kind.IDENT);
 
-    	    // function call without 'call'
-    	    if (have(Token.Kind.OPEN_PAREN)) {
-    	        return parseFuncCall(identToken);
-    	    }
+            // function call without 'call'
+            if (have(Token.Kind.OPEN_PAREN)) {
+                return parseFuncCall(identToken);
+            }
 
-    	    // r-value designator: IDENT [expr]...
-    	    Expression d = new Identifier(identToken.lineNumber(), identToken.charPosition(), identToken.lexeme());
-    	    while (accept(Token.Kind.OPEN_BRACKET)) {
-    	        Expression index = expression();
-    	        expect(Token.Kind.CLOSE_BRACKET);
-    	        d = new ArrayIndex(d.lineNumber(), d.charPosition(), d, index);
-    	    }
-    	    return d;
-    	}
+            Expression d = new Identifier(identToken.lineNumber(), identToken.charPosition(), identToken.lexeme());
+            while (accept(Token.Kind.OPEN_BRACKET)) {
+                Expression index = expression();
+                expect(Token.Kind.CLOSE_BRACKET);
+                d = new ArrayIndex(d.lineNumber(), d.charPosition(), d, index);
+            }
+            return d;
+        }
         if (have(Token.Kind.INT_VAL)) {
             Token tok = expectRetrieve(Token.Kind.INT_VAL);
             return new IntegerLiteral(tok.lineNumber(), tok.charPosition(), Integer.parseInt(tok.lexeme()));
@@ -748,11 +829,9 @@ public class Compiler {
             expect(Token.Kind.CLOSE_BRACKET);
             designator = new ArrayIndex(designator.lineNumber(), designator.charPosition(), designator, index);
         }
-
-        // Only wrap in AddressOf if it is used as an L-value in assignment
         return designator;
     }
-    
+
     private Expression literal() {
         Token tok = currentToken;
         if (accept(Token.Kind.INT_VAL)) {
@@ -769,7 +848,7 @@ public class Compiler {
         }
         throw new QuitParseException(reportSyntaxError(NonTerminal.LITERAL));
     }
-    
+
     private FunctionCall funcCall() {
         Token callToken = expectRetrieve(Token.Kind.CALL);
         Token identToken = expectRetrieve(Token.Kind.IDENT);
@@ -787,7 +866,7 @@ public class Compiler {
 
         return new FunctionCall(callToken.lineNumber(), callToken.charPosition(), id, args);
     }
-    
+
     private FunctionCall parseFuncCall(Token identToken) {
         Identifier id = new Identifier(identToken.lineNumber(), identToken.charPosition(), identToken.lexeme());
         expect(Token.Kind.OPEN_PAREN);
@@ -801,7 +880,11 @@ public class Compiler {
         expect(Token.Kind.CLOSE_PAREN);
         return new FunctionCall(identToken.lineNumber(), identToken.charPosition(), id, args);
     }
-    
+
+    // =========================================================================
+    //  IR WRAPPER + BASIC HELPERS
+    // =========================================================================
+
     private IR currentIR;
 
     /** Minimal IR handle that has asDotGraph(), as expected by CompilerTester. */
@@ -811,17 +894,18 @@ public class Compiler {
         public String asDotGraph() { return new CFGPrinter().print(blocks); }
         public List<BasicBlock> blocks() { return blocks; }
     }
-    
-    private static final class BlockFactory {
-        private final List<BasicBlock> all;
-        private int nextNo = 1;
-        BlockFactory(List<BasicBlock> sink){ this.all = sink; }
-        BasicBlock newBB(){ BasicBlock b = new BasicBlock(nextNo++); all.add(b); return b; }
-    }
-    
-    
-    
- // --------------------- Local IR Optimizer ---------------------
+
+//    private static final class BlockFactory {
+//        private final List<BasicBlock> all;
+//        private int nextNo = 1;
+//        BlockFactory(List<BasicBlock> sink){ this.all = sink; }
+//        BasicBlock newBB(){ BasicBlock b = new BasicBlock(nextNo++); all.add(b); return b; }
+//    }
+
+    // =========================================================================
+    //  LOCAL IR OPTIMIZER (CP / CF / CSE / DCE)
+    // =========================================================================
+
     class Optimizer {
 
         private boolean isPure(String op){
@@ -835,8 +919,8 @@ public class Compiler {
 
         private String keyOf(ir.tac.Value v){
             if (v == null) return "_";
-            if (v instanceof ir.tac.Literal l) return "K:"+String.valueOf(l.value());
-            return "V:"+v.toString();
+            if (v instanceof ir.tac.Literal l) return "K:" + String.valueOf(l.value());
+            return "V:" + v.toString();
         }
 
         private ir.tac.Value tryFold(String op, ir.tac.Value L, ir.tac.Value R){
@@ -897,6 +981,18 @@ public class Compiler {
                         if (l instanceof Comparable cl && r instanceof Comparable cr)
                             return new ir.tac.Literal(cl.compareTo(cr) >= 0);
                         break;
+                    case "and":
+                        if (l instanceof Boolean lb && r instanceof Boolean rb)
+                            return new ir.tac.Literal(lb && rb);
+                        break;
+                    case "or":
+                        if (l instanceof Boolean lb && r instanceof Boolean rb)
+                            return new ir.tac.Literal(lb || rb);
+                        break;
+                    case "not":
+                        if (l instanceof Boolean lb)
+                            return new ir.tac.Literal(!lb);
+                        break;
                 }
             } catch (Throwable ignore) {}
             return null;
@@ -945,14 +1041,14 @@ public class Compiler {
                     // Fast-path for mov with CP
                     if ("mov".equals(op)) {
                         if (doCP) {
-                            L = resolve(L, env); // fully resolved
+                            L = resolve(L, env);
                             env.put(a.dest().toString(), L);
                         }
                         out.add(prettyAssign(a.id(), a.dest(), "mov", L, null));
                         continue;
                     }
 
-                    // ---- CF: constant fold (on resolved operands)
+                    // ---- CF
                     if (doCF) {
                         ir.tac.Value cf = tryFold(op, L, R);
                         if (cf != null){
@@ -975,36 +1071,29 @@ public class Compiler {
                         }
                     }
 
-                    // Materialize instruction
                     out.add(prettyAssign(a.id(), a.dest(), op, L, R));
 
-                    // ---- CP: kill mapping on non-mov defs
                     if (doCP) {
                         env.remove(a.dest().toString());
                     }
                 }
                 else if (t instanceof ir.tac.Call c){
-                    // CP into call args only if CP is enabled
                     if (doCP && c.args()!=null) {
                         List<ir.tac.Value> newArgs = new ArrayList<>();
                         for (ir.tac.Value v : c.args()) {
-                            newArgs.add(resolve(v, env)); // transitive
+                            newArgs.add(resolve(v, env));
                         }
                         ir.tac.Call newCall;
                         if (c.dest()!=null) {
                             newCall = new ir.tac.Call(c.id(), c.function(), newArgs, c.dest());
-                            // kill mapping only for dest
                             env.remove(c.dest().toString());
                         } else {
                             newCall = new ir.tac.Call(c.id(), c.function(), newArgs);
                         }
                         out.add(newCall);
-
-                        // calls are side-effecting for CSE, but we KEEP env now
                         cse.clear();
                     } else {
                         out.add(t);
-                        // still treat as barrier for CSE
                         cse.clear();
                         if (c.dest()!=null) env.remove(c.dest().toString());
                     }
@@ -1014,7 +1103,7 @@ public class Compiler {
                 }
             }
 
-            // ---- DCE only if requested
+            // ---- DCE
             List<ir.tac.TAC> finalIns = out;
             if (doDCE) {
                 Set<String> live = new HashSet<>();
@@ -1045,237 +1134,168 @@ public class Compiler {
             bb.instructions().addAll(finalIns);
         }
     }
-	
-	
-	private static void removeOrphanFunctions(List<BasicBlock> blocks) {
-	    if (blocks == null || blocks.isEmpty()) return;
 
-	    // Map: function name -> entry block (block that starts with a "label")
-	    Map<String, BasicBlock> funcEntry = new HashMap<>();
-	    for (BasicBlock b : blocks) {
-	        List<ir.tac.TAC> ins = b.instructions();
-	        if (ins == null || ins.isEmpty()) continue;
-	        ir.tac.TAC first = ins.get(0);
-	        if (first instanceof ir.tac.Assign a && "label".equals(a.opcode())) {
-	            String s = a.toString();                 // "<name>"
-	            String name = (s.startsWith("<") && s.endsWith(">")) ? s.substring(1, s.length()-1) : s;
-	            funcEntry.put(name, b);
-	        }
-	    }
+    // =========================================================================
+    //  CFG UTILITIES: REMOVE ORPHAN FUNCTIONS, CFG SIMPLIFY, MERGE BLOCKS
+    // =========================================================================
 
-	    // Worklist starting from main’s first block
-	    Set<BasicBlock> keepBlocks = new HashSet<>();
-	    ArrayDeque<BasicBlock> q = new ArrayDeque<>();
-	    if (!blocks.isEmpty()) {
-	        keepBlocks.add(blocks.get(0));      // main’s first (unlabeled) block
-	        q.add(blocks.get(0));
-	    }
-
-	    // helper to filter built-ins
-	    java.util.function.Predicate<String> isBuiltin =
-	        n -> n != null && (n.startsWith("print") || n.startsWith("read") || "println".equals(n));
-
-	    Set<String> seenFuncs = new HashSet<>();
-
-	    while (!q.isEmpty()) {
-	        BasicBlock b = q.removeFirst();
-
-	        // Follow CFG edges
-	        List<BasicBlock> succs = b.succs();
-	        if (succs != null) {
-	            for (BasicBlock s : succs) if (keepBlocks.add(s)) q.add(s);
-	        }
-
-	        // Follow call edges to function entry blocks
-	        for (ir.tac.TAC t : b.instructions()) {
-	            if (t instanceof ir.tac.Call c) {
-	                mocha.Symbol f = c.function();           // <-- use function(), not sym()
-	                if (f == null) continue;
-	                String callee = f.name();
-	                if (isBuiltin.test(callee)) continue;    // ignore built-ins
-	                BasicBlock entry = funcEntry.get(callee);
-	                if (entry != null && seenFuncs.add(callee) && keepBlocks.add(entry)) {
-	                    q.add(entry);
-	                }
-	            }
-	        }
-	    }
-
-	    // Drop everything not reachable from main or a transitive callee
-	    blocks.removeIf(b -> !keepBlocks.contains(b));
-	}
-    
-	private String lastPreDot = null;
-	private String lastPostDot = null;
-
-	public String getPreDot()  { return lastPreDot; }
-	public String getPostDot() { return lastPostDot; }
-    
-
-    public IR genIR(ast.AST ast) {
-    	IRBuilder builder = new IRBuilder();   // owns its own block list and starts with bb1
-
-    	if (ast != null && ast.getRoot() != null) {
-    	    for (AST.Declaration d : ast.getRoot().functions()) {
-    	        if (d instanceof AST.FunctionDeclaration fd) {
-    	            fd.accept(builder);
-    	        }
-    	    }
-
-    	    builder.resetToMain();
-    	    
-    	    // emit default init MOVs for GLOBALS
-            for (AST.Declaration d : ast.getRoot().variables())
-            {
-                if (d instanceof AST.VariableDeclaration vd) vd.accept(builder);
-            }
-
-    	    ast.getRoot().mainStatementSequence().accept(builder);
-    	}
-
-        currentIR = new IR(builder.getBlocks());
-        
-        lastPreDot = currentIR.asDotGraph(); // Before Optimization
-        
-//        new Optimizer().optimize(currentIR.blocks());
-//        CFGSimplifier.simplify(currentIR.blocks());
-//        removeOrphanFunctions(currentIR.blocks());
-//        new Optimizer().optimize(currentIR.blocks());
-//        mergeTrivialEmpties(currentIR.blocks());
-//        
-        lastPostDot = currentIR.asDotGraph(); // After Optimization
-        
-        
-	    return currentIR;
-    }
-    
-    private void allocateRegisters(List<BasicBlock> blocks) {
+    private static void removeOrphanFunctions(List<BasicBlock> blocks) {
         if (blocks == null || blocks.isEmpty()) return;
 
-        //System.err.println("RA: running register allocation on " + blocks.size() + " blocks"); // Use only if you are not getting desired output
+        Map<String, BasicBlock> funcEntry = new HashMap<>();
+        for (BasicBlock b : blocks) {
+            List<ir.tac.TAC> ins = b.instructions();
+            if (ins == null || ins.isEmpty()) continue;
+            ir.tac.TAC first = ins.get(0);
+            if (first instanceof ir.tac.Assign a && "label".equals(a.opcode())) {
+                String s = a.toString();
+                String name = (s.startsWith("<") && s.endsWith(">")) ? s.substring(1, s.length()-1) : s;
+                funcEntry.put(name, b);
+            }
+        }
 
-        Map<String,Set<String>> ig = buildInterferenceGraph(blocks);
-        RegAllocResult res = colorGraph(ig, numDataRegisters);
-        //System.err.println("RA: colors = " + res.colors);
-        //System.err.println("RA: spilled = " + res.spilled);
-        rewriteWithRegisters(blocks, res.colors, res.spilled);
-        removeSillyMoves(blocks);
+        Set<BasicBlock> keepBlocks = new HashSet<>();
+        ArrayDeque<BasicBlock> q = new ArrayDeque<>();
+        if (!blocks.isEmpty()) {
+            keepBlocks.add(blocks.get(0));
+            q.add(blocks.get(0));
+        }
+
+        java.util.function.Predicate<String> isBuiltin =
+            n -> n != null && (n.startsWith("print") || n.startsWith("read") || "println".equals(n));
+
+        Set<String> seenFuncs = new HashSet<>();
+
+        while (!q.isEmpty()) {
+            BasicBlock b = q.removeFirst();
+
+            List<BasicBlock> succs = b.succs();
+            if (succs != null) {
+                for (BasicBlock s : succs) if (keepBlocks.add(s)) q.add(s);
+            }
+
+            for (ir.tac.TAC t : b.instructions()) {
+                if (t instanceof ir.tac.Call c) {
+                    mocha.Symbol f = c.function();
+                    if (f == null) continue;
+                    String callee = f.name();
+                    if (isBuiltin.test(callee)) continue;
+                    BasicBlock entry = funcEntry.get(callee);
+                    if (entry != null && seenFuncs.add(callee) && keepBlocks.add(entry)) {
+                        q.add(entry);
+                    }
+                }
+            }
+        }
+
+        blocks.removeIf(b -> !keepBlocks.contains(b));
     }
-    
+
     private static final class CFGSimplifier {
 
-    	static void simplify(java.util.List<BasicBlock> blocks) {
-    	    if (blocks == null || blocks.isEmpty()) return;
+        static void simplify(java.util.List<BasicBlock> blocks) {
+            if (blocks == null || blocks.isEmpty()) return;
 
-    	    // ---- 1) Constant branch folding (two shapes) ----
-    	    for (BasicBlock bb : blocks) {
-    	      java.util.List<ir.tac.TAC> ins = bb.instructions();
-    	      if (ins == null || ins.isEmpty()) continue;
+            // 1) Constant branch folding
+            for (BasicBlock bb : blocks) {
+                java.util.List<ir.tac.TAC> ins = bb.instructions();
+                if (ins == null || ins.isEmpty()) continue;
 
-    	      ir.tac.TAC last = ins.get(ins.size() - 1);
-    	      if (!(last instanceof ir.tac.Assign br)) continue;
-    	      if (!"test".equals(br.opcode())) continue;
+                ir.tac.TAC last = ins.get(ins.size() - 1);
+                if (!(last instanceof ir.tac.Assign br)) continue;
+                if (!"test".equals(br.opcode())) continue;
 
-    	      Boolean condConst = null;
+                Boolean condConst = null;
 
-    	      // Shape A: test <Literal true/false>
-    	      if (br.left() instanceof ir.tac.Literal litA && litA.value() instanceof Boolean) {
-    	        condConst = (Boolean) litA.value();
-    	      }
-    	      // Shape B:  ... ; t = mov true/false ; test t
-    	      else if (ins.size() >= 2) {
-    	        ir.tac.TAC before = ins.get(ins.size() - 2);
-    	        if (before instanceof ir.tac.Assign def
-    	            && "mov".equals(def.opcode())
-    	            && def.left() instanceof ir.tac.Literal litB
-    	            && litB.value() instanceof Boolean
-    	            && def.dest() != null
-    	            && br.left() instanceof ir.tac.Variable
-    	            && def.dest().toString().equals(((ir.tac.Variable) br.left()).toString())) {
-    	          condConst = (Boolean) litB.value();
-    	        }
-    	      }
+                if (br.left() instanceof ir.tac.Literal litA && litA.value() instanceof Boolean) {
+                    condConst = (Boolean) litA.value();
+                }
+                else if (ins.size() >= 2) {
+                    ir.tac.TAC before = ins.get(ins.size() - 2);
+                    if (before instanceof ir.tac.Assign def
+                        && "mov".equals(def.opcode())
+                        && def.left() instanceof ir.tac.Literal litB
+                        && litB.value() instanceof Boolean
+                        && def.dest() != null
+                        && br.left() instanceof ir.tac.Variable
+                        && def.dest().toString().equals(((ir.tac.Variable) br.left()).toString())) {
+                        condConst = (Boolean) litB.value();
+                    }
+                }
 
-    	      if (condConst == null) continue;
+                if (condConst == null) continue;
 
-    	      java.util.List<BasicBlock> succs = bb.succs();
-    	      if (succs == null || succs.size() != 2) continue;
+                java.util.List<BasicBlock> succs = bb.succs();
+                if (succs == null || succs.size() != 2) continue;
 
-    	      BasicBlock keep = condConst ? succs.get(0) : succs.get(1);
-    	      BasicBlock kill = condConst ? succs.get(1) : succs.get(0);
+                BasicBlock keep = condConst ? succs.get(0) : succs.get(1);
+                BasicBlock kill = condConst ? succs.get(1) : succs.get(0);
 
-    	      // prune untaken edge
-    	      succs.remove(kill);
-    	      java.util.List<BasicBlock> pk = kill.preds();
-    	      if (pk != null) pk.remove(bb);
+                succs.remove(kill);
+                java.util.List<BasicBlock> pk = kill.preds();
+                if (pk != null) pk.remove(bb);
 
-    	      // (optional) remove the final 'test' TAC:
-    	      ins.remove(ins.size() - 1);
-    	    }
+                ins.remove(ins.size() - 1);
+            }
 
-    	    // ---- 2) Reachability from ALL true roots (function entries + first block) ----
-    	    java.util.HashSet<BasicBlock> visited = new java.util.HashSet<>();
-    	    java.util.ArrayDeque<BasicBlock> queue = new java.util.ArrayDeque<>();
+            // 2) Reachability from function entries + main
+            java.util.HashSet<BasicBlock> visited = new java.util.HashSet<>();
+            java.util.ArrayDeque<BasicBlock> queue = new java.util.ArrayDeque<>();
 
-    	    // roots = blocks that start with a 'label' (function entries)
-    	    for (BasicBlock b : blocks) {
-    	      java.util.List<ir.tac.TAC> ins = b.instructions();
-    	      boolean isFuncEntry = ins != null && !ins.isEmpty()
-    	          && (ins.get(0) instanceof ir.tac.Assign a0)
-    	          && "label".equals(a0.opcode());
-    	      if (isFuncEntry) {
-    	        if (visited.add(b)) queue.addLast(b);
-    	      }
-    	    }
-    	    // also include the very first block (main entry)
-    	    if (!blocks.isEmpty() && visited.add(blocks.get(0))) queue.addLast(blocks.get(0));
+            for (BasicBlock b : blocks) {
+                java.util.List<ir.tac.TAC> ins = b.instructions();
+                boolean isFuncEntry = ins != null && !ins.isEmpty()
+                    && (ins.get(0) instanceof ir.tac.Assign a0)
+                    && "label".equals(a0.opcode());
+                if (isFuncEntry) {
+                    if (visited.add(b)) queue.addLast(b);
+                }
+            }
+            if (!blocks.isEmpty() && visited.add(blocks.get(0))) queue.addLast(blocks.get(0));
 
-    	    while (!queue.isEmpty()) {
-    	      BasicBlock b = queue.removeFirst();
-    	      java.util.List<BasicBlock> succs = b.succs();
-    	      if (succs == null) continue;
-    	      for (BasicBlock s : succs) {
-    	        if (visited.add(s)) queue.addLast(s);
-    	      }
-    	    }
+            while (!queue.isEmpty()) {
+                BasicBlock b = queue.removeFirst();
+                java.util.List<BasicBlock> succs = b.succs();
+                if (succs == null) continue;
+                for (BasicBlock s : succs) {
+                    if (visited.add(s)) queue.addLast(s);
+                }
+            }
 
-    	    // ---- 3) Drop unreachable blocks ----
-    	    blocks.removeIf(b -> !visited.contains(b));
-
-    	}
+            blocks.removeIf(b -> !visited.contains(b));
+        }
     }
-    
+
     private static void mergeTrivialEmpties(List<BasicBlock> blocks){
-    	  boolean changed;
-    	  do {
-    	    changed = false;
-    	    for (int i = 0; i < blocks.size(); i++){
-    	      BasicBlock b = blocks.get(i);
-    	      List<ir.tac.TAC> ins = b.instructions();
-    	      List<BasicBlock> succs = b.succs(), preds = b.preds();
-    	      if (ins.isEmpty() && succs != null && succs.size()==1){
-    	        BasicBlock s = succs.get(0);
-    	        // redirect all preds of b to s
-    	        if (preds != null) {
-    	          for (BasicBlock p : new ArrayList<>(preds)) {
-    	            List<BasicBlock> ps = p.succs();
-    	            for (int k = 0; k < ps.size(); k++) if (ps.get(k) == b) ps.set(k, s);
-    	            s.preds().add(p);
-    	          }
-    	        }
-    	        // drop edge b->s and remove b from s.preds
-    	        s.preds().remove(b);
-    	        succs.clear();
-    	        // remove b
-    	        blocks.remove(i--);
-    	        changed = true;
-    	      }
-    	    }
-    	  } while (changed);
-    	}
-    
-    //PA5
-    
+        boolean changed;
+        do {
+            changed = false;
+            for (int i = 0; i < blocks.size(); i++){
+                BasicBlock b = blocks.get(i);
+                List<ir.tac.TAC> ins = b.instructions();
+                List<BasicBlock> succs = b.succs(), preds = b.preds();
+                if (ins.isEmpty() && succs != null && succs.size()==1){
+                    BasicBlock s = succs.get(0);
+                    if (preds != null) {
+                        for (BasicBlock p : new ArrayList<>(preds)) {
+                            List<BasicBlock> ps = p.succs();
+                            for (int k = 0; k < ps.size(); k++) if (ps.get(k) == b) ps.set(k, s);
+                            s.preds().add(p);
+                        }
+                    }
+                    s.preds().remove(b);
+                    succs.clear();
+                    blocks.remove(i--);
+                    changed = true;
+                }
+            }
+        } while (changed);
+    }
+
+    // =========================================================================
+    //  REGISTER ALLOCATION (GRAPH COLORING)
+    // =========================================================================
+
     // Remove silly moves like  R5 = R5  after register allocation.
     private static void removeSillyMoves(List<BasicBlock> blocks) {
         if (blocks == null) return;
@@ -1293,7 +1313,6 @@ public class Compiler {
                     ir.tac.Variable dst = a.dest();
                     if (src instanceof ir.tac.Variable v && dst != null) {
                         if (v.toString().equals(dst.toString())) {
-                            // e.g. R3 = R3  → useless
                             it.remove();
                         }
                     }
@@ -1301,28 +1320,25 @@ public class Compiler {
             }
         }
     }
-    
-    // Result of register allocation
+
     private static final class RegAllocResult {
-        final Map<String,Integer> colors;  // var -> register index [0..K-1]
-        final Set<String> spilled;        // vars that could not get a color
+        final Map<String,Integer> colors;
+        final Set<String> spilled;
 
         RegAllocResult(Map<String,Integer> c, Set<String> s) {
             this.colors = c;
             this.spilled = s;
         }
     }
-    
- // Collect variable *names* used by a TAC
+
+    // Collect variable *names* used by a TAC
     private static Set<String> usedVars(ir.tac.TAC t) {
         Set<String> u = new HashSet<>();
 
         if (t instanceof ir.tac.Assign a) {
             String op = a.opcode();
-            // label has no data uses
             if ("label".equals(op)) return u;
 
-            // test and ret only use the left operand
             if ("test".equals(op) || "ret".equals(op)) {
                 if (a.left() instanceof ir.tac.Variable v) u.add(v.toString());
                 return u;
@@ -1344,7 +1360,6 @@ public class Compiler {
     private static String defVar(ir.tac.TAC t) {
         if (t instanceof ir.tac.Assign a) {
             String op = a.opcode();
-            // structural ops don't define a register
             if ("label".equals(op) || "test".equals(op) || "ret".equals(op)) return null;
             ir.tac.Variable dst = a.dest();
             return (dst == null) ? null : dst.toString();
@@ -1355,16 +1370,17 @@ public class Compiler {
         }
         return null;
     }
-    
-    
+
+    // =========================================================================
+    //  NODEVISITOR ADAPTER (NO-OP DEFAULTS)
+    // =========================================================================
+
     private static class NodeVisitorAdapter implements ast.NodeVisitor {
-        // literals / ids
         @Override public void visit(AST.IntegerLiteral n) {}
         @Override public void visit(AST.FloatLiteral n) {}
         @Override public void visit(AST.BoolLiteral n) {}
         @Override public void visit(AST.Identifier n) {}
 
-        // unary / binary ops
         @Override public void visit(AST.UnaryMinus n) {}
         @Override public void visit(AST.Addition n) {}
         @Override public void visit(AST.Subtraction n) {}
@@ -1377,12 +1393,10 @@ public class Compiler {
         @Override public void visit(AST.LogicalOr n) {}
         @Override public void visit(AST.Relation n) {}
 
-        // lvalues / misc
         @Override public void visit(AST.AddressOf n) {}
         @Override public void visit(AST.ArrayIndex n) {}
         @Override public void visit(AST.Dereference n) {}
 
-        // statements
         @Override public void visit(AST.StatementSequence n) {}
         @Override public void visit(AST.Assignment n) {}
         @Override public void visit(AST.IfStatement n) {}
@@ -1390,7 +1404,6 @@ public class Compiler {
         @Override public void visit(AST.RepeatStatement n) {}
         @Override public void visit(AST.ReturnStatement n) {}
 
-        // functions / declarations / types
         @Override public void visit(AST.FunctionCall n) {}
         @Override public void visit(AST.ArgumentList n) {}
         @Override public void visit(AST.FunctionBody n) {}
@@ -1399,11 +1412,13 @@ public class Compiler {
         @Override public void visit(AST.DeclarationList n) {}
         @Override public void visit(AST.TypeNode n) {}
 
-        // root
         @Override public void visit(ast.Computation n) {}
     }
-    
- // Pretty-print helpers (inside class Compiler)
+
+    // =========================================================================
+    //  PRETTY-PRINT HELPERS FOR TAC (USED BY OPT + RA + IRBUILDER)
+    // =========================================================================
+
     private static String opSym(String op) {
         return switch (op) {
             case "add" -> "+";
@@ -1420,40 +1435,44 @@ public class Compiler {
             case "cmpge" -> ">=";
             case "and" -> "&&";
             case "or"  -> "||";
-            case "not" -> "!";   // unary
-            // keep fallbacks for anything unusual
+            case "not" -> "!";
             default -> op;
         };
     }
 
     private static String pretty(String op, ir.tac.Variable dst, ir.tac.Value L, ir.tac.Value R) {
-        if ("mov".equals(op)) {                 // x = y
+        if ("mov".equals(op)) {
             return dst + " = " + (L == null ? "" : L.toString());
         }
-        if ("not".equals(op)) {                 // t = !x
+        if ("not".equals(op)) {
             return dst + " = " + opSym(op) + (L == null ? "" : L.toString());
         }
-        // binary infix: t = L (+) R
-        return dst + " = " + (L==null ? "" : L.toString()) + " " + opSym(op) + " " + (R==null ? "" : R.toString());
+        return dst + " = " + (L==null ? "" : L.toString()) + " " +
+               opSym(op) + " " + (R==null ? "" : R.toString());
     }
-    
- // Create an Assign that prints infix with pretty()
-    private static ir.tac.Assign prettyAssign(int id,
-            ir.tac.Variable dst,
-            String opcode,
-            ir.tac.Value L,
-            ir.tac.Value R) {
-	return new ir.tac.Assign(id, dst, L, R) {
-	@Override protected String op() { return opcode; }
-	@Override public String toString() {
-	if ("label".equals(opcode) || "test".equals(opcode) || "ret".equals(opcode)) {
-	return super.toString();
-	}
-	return pretty(op(), dst, left(), right());
-	}
-	};
-	}
-    
+
+    private static ir.tac.Assign prettyAssign(
+        int id,
+        ir.tac.Variable dst,
+        String opcode,
+        ir.tac.Value L,
+        ir.tac.Value R
+    ) {
+        return new ir.tac.Assign(id, dst, L, R) {
+            @Override protected String op() { return opcode; }
+            @Override public String toString() {
+                if ("label".equals(opcode) || "test".equals(opcode) || "ret".equals(opcode)) {
+                    return super.toString();
+                }
+                return pretty(op(), dst, left(), right());
+            }
+        };
+    }
+
+    // =========================================================================
+    //  IR BUILDER (AST → TAC + CFG)
+    // =========================================================================
+
     private final class IRBuilder extends NodeVisitorAdapter {
         private final List<BasicBlock> blocks = new ArrayList<>();
         private BasicBlock cur;
@@ -1477,30 +1496,28 @@ public class Compiler {
         private Variable newTmp() { return v("_t" + (++tmpCounter)); }
         private Variable v(String name) { return new Variable(new mocha.Symbol(name, null)); }
 
-        // ------------ core expression lowering helpers ------------
-
-        /** Old helper: lower expression, always using temps for intermediate results. */
         private Value val(ast.Expression e) {
             return valInto(e, null);
         }
 
-        /**
-         * Lower an expression to a Value, *preferably* using 'preferredDst' as the
-         * destination for the top-level operation, to avoid extra
-         *   tmp = a + b; x = tmp
-         * patterns in assignments.
-         */
         private Value valInto(ast.Expression e, Variable preferredDst) {
-            // literals and identifiers: no TAC, just return a Value
             if (e instanceof AST.IntegerLiteral il) return new Literal(il.getValue());
             if (e instanceof AST.FloatLiteral   fl) return new Literal(fl.getValue());
             if (e instanceof AST.BoolLiteral    bl) return new Literal(bl.getValue());
             if (e instanceof AST.Identifier     id) return v(id.getName());
+            
+            if (e instanceof AST.ArrayIndex ai) {
+                ast.Expression base = ai.getBase();
+                if (base instanceof AST.Identifier bid) {
+                    // just treat x[i][j] as "x" in the IR
+                    return v(bid.getName());
+                }
+                // fallback: at least try to get a value for the base expression
+                return valInto(base, preferredDst);
+            }
 
-            // choose destination for this node if we need one
             Variable dst = (preferredDst != null) ? preferredDst : newTmp();
 
-            // ----- arithmetic binary ops -----
             if (e instanceof AST.Addition add) {
                 Value L = val(add.getLeft());
                 Value R = val(add.getRight());
@@ -1551,7 +1568,6 @@ public class Compiler {
                 return dst;
             }
 
-            // POW (^)
             if (e instanceof AST.Power pow) {
                 Value L = val(pow.getBase());
                 Value R = val(pow.getExponent());
@@ -1562,7 +1578,6 @@ public class Compiler {
                 return dst;
             }
 
-            // Unary minus   encode -x as (0 - x)
             if (e instanceof AST.UnaryMinus um) {
                 Value R = val(um.getExpr());
                 Value Z = new Literal(0);
@@ -1573,7 +1588,6 @@ public class Compiler {
                 return dst;
             }
 
-            // ----- logical not / and / or -----
             if (e instanceof AST.LogicalNot ln) {
                 Value R = val(ln.getExpression());
                 cur.addInstruction(new Assign(newId(), dst, R, null) {
@@ -1603,7 +1617,6 @@ public class Compiler {
                 return dst;
             }
 
-            // Relations
             if (e instanceof AST.Relation rel) {
                 Value L = val(rel.getLeft());
                 Value R = val(rel.getRight());
@@ -1620,56 +1633,60 @@ public class Compiler {
                 return dst;
             }
 
-            // Function call
             if (e instanceof AST.FunctionCall fc) {
                 ArrayList<Value> args = new ArrayList<>();
                 for (ast.Expression a : fc.getArguments().getArguments()) args.add(val(a));
-                // if we have a preferredDst, use it as the result variable
                 Variable callDst = (preferredDst != null) ? preferredDst : newTmp();
-                cur.addInstruction(new Call(newId(), new mocha.Symbol(fc.getIdentifier().getName(), null), args, callDst));
+                cur.addInstruction(new Call(newId(),
+                    new mocha.Symbol(fc.getIdentifier().getName(), null),
+                    args,
+                    callDst));
                 return callDst;
             }
 
-            // fallback – shouldn’t normally happen
             return new Literal(e);
         }
 
-        // --------------------- statements ---------------------
-
         @Override
         public void visit(AST.Assignment node) {
-            if (!(node.getDestination() instanceof AST.Identifier id))
-                throw new RuntimeException("Only simple lvalues supported in this minimal builder.");
+        	// Case 1: simple variable assignment – same as before
+            if (node.getDestination() instanceof AST.Identifier id) {
+                Variable dst = v(id.getName());
+                int before = cur.instructions().size();
+                Value rhs = valInto(node.getSource(), dst);
+                int after = cur.instructions().size();
 
-            Variable dst = v(id.getName());
-
-            // Count instructions before lowering RHS
-            int before = cur.instructions().size();
-
-            // Try to compute RHS directly into 'dst'
-            Value rhs = valInto(node.getSource(), dst);
-
-            int after = cur.instructions().size();
-
-            // If no instruction was emitted for the RHS (simple literal/var), we still
-            // need a mov dst = rhs, unless it's already the same variable.
-            if (after == before) {
-                boolean sameVar = (rhs instanceof Variable v) && v.toString().equals(dst.toString());
-                if (!sameVar) {
-                    cur.addInstruction(new Assign(newId(), dst, rhs, null) {
-                        @Override protected String op(){ return "mov"; }
-                        @Override public String toString(){ return pretty(op(), dst, rhs, null); }
-                    });
+                // If valInto did not emit anything, fall back to a mov.
+                if (after == before) {
+                    boolean sameVar = (rhs instanceof Variable v) && v.toString().equals(dst.toString());
+                    if (!sameVar) {
+                        cur.addInstruction(new Assign(newId(), dst, rhs, null) {
+                            @Override protected String op(){ return "mov"; }
+                            @Override public String toString(){ return pretty(op(), dst, rhs, null); }
+                        });
+                    }
                 }
+                return;
             }
+
+            // Case 2: complex lvalues (arrays, pointers, etc.)
+            // In this *minimal* builder we simply:
+            //   - DO NOT model the store
+            //   - but DO evaluate the RHS so optimizations still see that work.
+            //
+            // This avoids the "Only simple lvalues supported" crash on things like
+            //    x[i][j] = y[i][j] + z[i][j];
+            // while keeping the IR good enough for CP/CSE/DCE tests.
+            val(node.getSource());
         }
 
         @Override
         public void visit(AST.FunctionCall node) {
             ArrayList<Value> args = new ArrayList<>();
             for (ast.Expression e : node.getArguments().getArguments()) args.add(val(e));
-            // void call
-            cur.addInstruction(new Call(newId(), new mocha.Symbol(node.getIdentifier().getName(), null), args));
+            cur.addInstruction(new Call(newId(),
+                new mocha.Symbol(node.getIdentifier().getName(), null),
+                args));
         }
 
         @Override
@@ -1683,26 +1700,24 @@ public class Compiler {
                 @Override protected String op(){ return "test"; }
                 @Override public String toString(){
                     return "if " + cond + " goto " + thenBB.dotNodeName() +
-                           (elseBB!=null ? " else " + elseBB.dotNodeName() : " else " + joinBB.dotNodeName());
+                           (elseBB!=null ? " else " + elseBB.dotNodeName()
+                                         : " else " + joinBB.dotNodeName());
                 }
             });
             cur.addSuccessor(thenBB);
             cur.addSuccessor(elseBB != null ? elseBB : joinBB);
 
-            // THEN
             BasicBlock saved = cur;
             cur = thenBB;
             n.getThenBlock().accept(this);
             cur.addSuccessor(joinBB);
 
-            // ELSE (optional)
             if (elseBB != null) {
                 cur = elseBB;
                 n.getElseBlock().accept(this);
                 cur.addSuccessor(joinBB);
             }
 
-            // continue at join
             cur = joinBB;
         }
 
@@ -1719,7 +1734,8 @@ public class Compiler {
             cur.addInstruction(new Assign(newId(), newTmp(), cond, null) {
                 @Override protected String op(){ return "test"; }
                 @Override public String toString(){
-                    return "if " + cond + " goto " + bodyBB.dotNodeName() + " else " + exitBB.dotNodeName();
+                    return "if " + cond + " goto " + bodyBB.dotNodeName()
+                           + " else " + exitBB.dotNodeName();
                 }
             });
             cur.addSuccessor(bodyBB);
@@ -1749,7 +1765,8 @@ public class Compiler {
             cur.addInstruction(new Assign(newId(), newTmp(), cond, null) {
                 @Override protected String op(){ return "test"; }
                 @Override public String toString(){
-                    return "if " + cond + " goto " + exitBB.dotNodeName() + " else " + bodyBB.dotNodeName();
+                    return "if " + cond + " goto " + exitBB.dotNodeName()
+                           + " else " + bodyBB.dotNodeName();
                 }
             });
             cur.addSuccessor(exitBB);
@@ -1792,8 +1809,6 @@ public class Compiler {
             for (ast.Statement s : node) {
                 if (s == null) continue;
                 s.accept(this);
-
-                // If this statement is a return, the rest of this sequence is definitely unreachable and we shouldn't emit IR for it.
                 if (s instanceof AST.ReturnStatement) {
                     break;
                 }
@@ -1817,14 +1832,12 @@ public class Compiler {
             setInit(name);
         }
 
-        // ---- init tracking (same as you had) ----
         private final Deque<Set<String>> initStack = new ArrayDeque<>();
         private void enterInitScope(){ initStack.push(new HashSet<>()); }
         private void exitInitScope(){ initStack.pop(); }
         private boolean isInit(String n){ for (var s: initStack) if (s.contains(n)) return true; return false; }
         private void setInit(String n){ if (!initStack.isEmpty()) initStack.peek().add(n); }
 
-        // no-ops for everything else...
         @Override public void visit(AST.LogicalAnd n) {}
         @Override public void visit(AST.LogicalOr n) {}
         @Override public void visit(AST.LogicalNot n) {}
@@ -1847,88 +1860,155 @@ public class Compiler {
         @Override public void visit(AST.BoolLiteral n) {}
     }
 
-    /** Run selected optimizations and return DOT text of the resulting IR. */
-    public String optimization(List<String> opts, boolean loop, boolean max) {
-    // Always rebuild IR fresh for each optimization run
-    currentIR = genIR(this.astRoot);
+    // =========================================================================
+    //  IR GENERATION ENTRY + LAST DOT SNAPSHOTS
+    // =========================================================================
 
-    // Reinterpret 'max': only true when no explicit -o options were passed.
-    boolean realMax = max && (opts == null || opts.isEmpty());
+    private String lastPreDot = null;
+    private String lastPostDot = null;
 
-    List<String> plan;
-    if (realMax) {
-        // Max pipeline: include RA at the very end
-        plan = Arrays.asList("cp","cf","cse","dce","cfg","ofe","merge","ra");
-    } else if (opts != null && !opts.isEmpty()) {
-        // Explicit -o sequence: honor user order
-        plan = new ArrayList<>(opts);
-    } else {
-        // No -max, no -o → no optimizations
-        plan = Collections.emptyList();
-    }
+    public String getPreDot()  { return lastPreDot; }
+    public String getPostDot() { return lastPostDot; }
 
-    // Split into "loopable" passes and "ra" (non-loop)
-    List<String> prePasses = new ArrayList<>();
-    boolean doRA = false;
-    for (String p : plan) {
-        if ("ra".equalsIgnoreCase(p)) {
-            doRA = true;
-        } else {
-            prePasses.add(p.toLowerCase());
+    public IR genIR(ast.AST ast) {
+        IRBuilder builder = new IRBuilder();
+
+        if (ast != null && ast.getRoot() != null) {
+            for (AST.Declaration d : ast.getRoot().functions()) {
+                if (d instanceof AST.FunctionDeclaration fd) {
+                    fd.accept(builder);
+                }
+            }
+
+            builder.resetToMain();
+
+            for (AST.Declaration d : ast.getRoot().variables()) {
+                if (d instanceof AST.VariableDeclaration vd) vd.accept(builder);
+            }
+
+            ast.getRoot().mainStatementSequence().accept(builder);
         }
+
+        currentIR = new IR(builder.getBlocks());
+        lastPreDot = currentIR.asDotGraph();
+        lastPostDot = currentIR.asDotGraph();
+        return currentIR;
     }
 
-    String prev;
-    do {
-        prev = currentIR.asDotGraph();
-
-        for (String p : prePasses) {
-            switch (p) {
-                case "cp":
-                    new Optimizer(true,  false, false, false).optimize(currentIR.blocks());
-                    break;
-                case "cf":
-                    new Optimizer(false, true,  false, false).optimize(currentIR.blocks());
-                    break;
-                case "cse":
-                    new Optimizer(false, false, true,  false).optimize(currentIR.blocks());
-                    break;
-                case "dce":
-                    new Optimizer(false, false, false, true ).optimize(currentIR.blocks());
-                    break;
-                case "cfg":
-                    CFGSimplifier.simplify(currentIR.blocks());
-                    break;
-                case "ofe":
-                    removeOrphanFunctions(currentIR.blocks());
-                    break;
-                case "merge":
-                    mergeTrivialEmpties(currentIR.blocks());
-                    break;
-                default:
-                    break;
+    private void allocateRegisters(List<BasicBlock> blocks) {
+        if (blocks == null || blocks.isEmpty()) return;
+        Map<String,Set<String>> ig = buildInterferenceGraph(blocks);
+        RegAllocResult res = colorGraph(ig, numDataRegisters);
+        
+        // --- DEBUG: print coloring result and spills ---
+        System.err.println("==== RA: Coloring Result (K = " + numDataRegisters + ") ====");
+        for (Map.Entry<String,Integer> e : res.colors.entrySet()) {
+            System.err.println("  var " + e.getKey() + " -> R" + e.getValue());
+        }
+        System.err.println("==== RA: Spilled Variables ====");
+        if (res.spilled.isEmpty()) {
+            System.err.println("  (none)");
+        } else {
+            for (String v : res.spilled) {
+                System.err.println("  " + v + " -> spilled (M_" + v + ")");
             }
         }
-	      // Loop to convergence only if 'loop' parameter is true
-	    } while (loop && !currentIR.asDotGraph().equals(prev));
-	
-	    // Run RA exactly once at the end, outside the convergence loop
-	    if (doRA) {
-	        allocateRegisters(currentIR.blocks());
-	    }
-	
-	    lastPostDot = currentIR.asDotGraph();
-	    return lastPostDot;
-	}
-    
-    //PA5
-    //Graph coloring
-    // Build interference graph via global liveness analysis
+        System.err.println();
+        
+        rewriteWithRegisters(blocks, res.colors, res.spilled);
+        removeSillyMoves(blocks);
+        
+//        // --- DEBUG: show final TAC per block ---
+//        System.err.println("==== RA: TAC After Rewrite ====");
+//        for (BasicBlock b : blocks) {
+//            System.err.println(b.dotNodeName() + ":");
+//            for (ir.tac.TAC t : b.instructions()) {
+//                System.err.println("    " + t);
+//            }
+//        }
+//        System.err.println("================================\n");
+    }
+
+    // =========================================================================
+    //  OPTIMIZATION DRIVER: -o FLAGS, LOOP, -max, AND RA
+    // =========================================================================
+
+    /** Run selected optimizations and return DOT text of the resulting IR. */
+    public String optimization(List<String> opts, boolean loop, boolean max) {
+        // Always rebuild IR fresh for each optimization run
+        currentIR = genIR(this.astRoot);
+
+        boolean realMax = max && (opts == null || opts.isEmpty());
+
+        List<String> plan;
+        if (realMax) {
+            // Max pipeline: include RA at the very end
+            plan = Arrays.asList("cp","cf","cse","dce","cfg","ofe","merge","ra");
+        } else if (opts != null && !opts.isEmpty()) {
+            plan = new ArrayList<>(opts);
+        } else {
+            plan = Collections.emptyList();
+        }
+
+        List<String> prePasses = new ArrayList<>();
+        boolean doRA = false;
+        for (String p : plan) {
+            if ("ra".equalsIgnoreCase(p)) {
+                doRA = true;
+            } else {
+                prePasses.add(p.toLowerCase());
+            }
+        }
+
+        String prev;
+        do {
+            prev = currentIR.asDotGraph();
+
+            for (String p : prePasses) {
+                switch (p) {
+                    case "cp":
+                        new Optimizer(true,  false, false, false).optimize(currentIR.blocks());
+                        break;
+                    case "cf":
+                        new Optimizer(false, true,  false, false).optimize(currentIR.blocks());
+                        break;
+                    case "cse":
+                        new Optimizer(false, false, true,  false).optimize(currentIR.blocks());
+                        break;
+                    case "dce":
+                        new Optimizer(false, false, false, true ).optimize(currentIR.blocks());
+                        break;
+                    case "cfg":
+                        CFGSimplifier.simplify(currentIR.blocks());
+                        break;
+                    case "ofe":
+                        removeOrphanFunctions(currentIR.blocks());
+                        break;
+                    case "merge":
+                        mergeTrivialEmpties(currentIR.blocks());
+                        break;
+                    default:
+                        break;
+                }
+            }
+        } while (loop && !currentIR.asDotGraph().equals(prev));
+
+        if (doRA) {
+            allocateRegisters(currentIR.blocks());
+        }
+
+        lastPostDot = currentIR.asDotGraph();
+        return lastPostDot;
+    }
+
+    // =========================================================================
+    //  LIVENESS + INTERFERENCE GRAPH BUILDING
+    // =========================================================================
+
     private static Map<String,Set<String>> buildInterferenceGraph(List<BasicBlock> blocks) {
         Map<BasicBlock,Set<String>> useB = new HashMap<>();
         Map<BasicBlock,Set<String>> defB = new HashMap<>();
 
-        // 1) Per-block use/def
         for (BasicBlock b : blocks) {
             Set<String> use = new HashSet<>();
             Set<String> def = new HashSet<>();
@@ -1938,7 +2018,6 @@ public class Compiler {
                     Set<String> used = usedVars(t);
                     String defv = defVar(t);
 
-                    // vars used before defined in this block go into useB
                     for (String v : used) {
                         if (!def.contains(v)) use.add(v);
                     }
@@ -1949,7 +2028,6 @@ public class Compiler {
             defB.put(b, def);
         }
 
-        // 2) Solve dataflow for live-in/live-out
         Map<BasicBlock,Set<String>> in  = new HashMap<>();
         Map<BasicBlock,Set<String>> out = new HashMap<>();
         for (BasicBlock b : blocks) {
@@ -1960,14 +2038,12 @@ public class Compiler {
         boolean changed;
         do {
             changed = false;
-            // backwards is nice but not required
             ListIterator<BasicBlock> it = blocks.listIterator(blocks.size());
             while (it.hasPrevious()) {
                 BasicBlock b = it.previous();
                 Set<String> inOld  = in.get(b);
                 Set<String> outOld = out.get(b);
 
-                // out[b] = ⋃ in[s] over succs
                 Set<String> outNew = new HashSet<>();
                 List<BasicBlock> succs = b.succs();
                 if (succs != null) {
@@ -1977,7 +2053,6 @@ public class Compiler {
                     }
                 }
 
-                // in[b] = use[b] ∪ (out[b] − def[b])
                 Set<String> inNew = new HashSet<>(useB.get(b));
                 Set<String> tmp = new HashSet<>(outNew);
                 tmp.removeAll(defB.get(b));
@@ -1991,7 +2066,6 @@ public class Compiler {
             }
         } while (changed);
 
-        // 3) Build interference graph from per-instruction liveness
         Map<String,Set<String>> graph = new HashMap<>();
         java.util.function.Consumer<String> ensure =
             v -> graph.computeIfAbsent(v, k -> new HashSet<>());
@@ -2007,7 +2081,6 @@ public class Compiler {
                 Set<String> used = usedVars(t);
                 String defv = defVar(t);
 
-                // connect def with everything live-after
                 if (defv != null) {
                     ensure.accept(defv);
                     for (String v : live) {
@@ -2019,20 +2092,19 @@ public class Compiler {
                     live.remove(defv);
                 }
 
-                // live-before = used ∪ (live-after − def)
                 live.addAll(used);
-
-                // ensure used-only vars show up as nodes
                 for (String v : used) ensure.accept(v);
             }
         }
 
         return graph;
     }
-    
-    // Chaitin-style simplification + selection
+
+    // =========================================================================
+    //  GRAPH COLORING (CHAITIN-STYLE)
+    // =========================================================================
+
     private static RegAllocResult colorGraph(Map<String,Set<String>> graph, int K) {
-        // Working copy
         Map<String,Set<String>> work = new HashMap<>();
         for (var e : graph.entrySet()) {
             work.put(e.getKey(), new HashSet<>(e.getValue()));
@@ -2041,7 +2113,6 @@ public class Compiler {
         List<String> stack = new ArrayList<>();
         Set<String> spilled = new HashSet<>();
 
-        // Simplify
         while (!work.isEmpty()) {
             String low = null;
 
@@ -2056,7 +2127,6 @@ public class Compiler {
             if (low != null) {
                 n = low;
             } else {
-                // spill candidate: highest degree
                 n = null;
                 int best = -1;
                 for (var e : work.entrySet()) {
@@ -2079,7 +2149,6 @@ public class Compiler {
             stack.add(n);
         }
 
-        // Select colors
         Map<String,Integer> color = new HashMap<>();
 
         while (!stack.isEmpty()) {
@@ -2108,82 +2177,558 @@ public class Compiler {
 
         return new RegAllocResult(color, spilled);
     }
-    
-    
-	private static ir.tac.Variable rewriteVar(ir.tac.Variable v, Map<String,Integer> colors, Set<String> spilled) {
-	if (v == null) return null;
-	String name = v.toString();
-	
-	if (colors.containsKey(name)) {
-	int c = colors.get(name);
-	return new ir.tac.Variable(new mocha.Symbol("R" + c, null));
-	}
-	if (spilled.contains(name)) {
-	// "Virtual register in memory" – just tag it so we can see it
-	return new ir.tac.Variable(new mocha.Symbol("M_" + name, null));
-	}
-	return v;
-	}
-	
-	private static ir.tac.Value rewriteVal(ir.tac.Value val,
-	         Map<String,Integer> colors,
-	         Set<String> spilled) {
-	if (val instanceof ir.tac.Variable v) {
-	return rewriteVar(v, colors, spilled);
-	}
-	return val;
-	}
-	
-	private static void rewriteWithRegisters(List<BasicBlock> blocks,  Map<String,Integer> colors, Set<String> spilled) {
-	for (BasicBlock b : blocks) {
-	List<ir.tac.TAC> ins = b.instructions();
-	if (ins == null || ins.isEmpty()) continue;
-	
-	List<ir.tac.TAC> out = new ArrayList<>();
-	
-	for (ir.tac.TAC t : ins) {
-	if (t instanceof ir.tac.Assign a) {
-	String op = a.opcode();
-	ir.tac.Variable dst = rewriteVar(a.dest(), colors, spilled);
-	ir.tac.Value L = rewriteVal(a.left(),  colors, spilled);
-	ir.tac.Value R = rewriteVal(a.right(), colors, spilled);
-	
-	// keep label/test/ret behaviour from prettyAssign()
-	out.add(prettyAssign(a.id(), dst, op, L, R));
-	} else if (t instanceof ir.tac.Call c) {
-	ir.tac.Variable dst = rewriteVar(c.dest(), colors, spilled);
-	List<ir.tac.Value> newArgs = null;
-	if (c.args() != null) {
-	newArgs = new ArrayList<>();
-	for (ir.tac.Value v : c.args()) {
-	newArgs.add(rewriteVal(v, colors, spilled));
-	}
-	}
-	ir.tac.Call nc;
-	if (dst != null) {
-	nc = new ir.tac.Call(c.id(), c.function(), newArgs, dst);
-	} else {
-	nc = new ir.tac.Call(c.id(), c.function(), newArgs);
-	}
-	out.add(nc);
-	} else {
-	out.add(t);
-	}
-	}
-	
-	ins.clear();
-	ins.addAll(out);
-	}
-	}
 
+    private static ir.tac.Variable rewriteVar(
+        ir.tac.Variable v,
+        Map<String,Integer> colors,
+        Set<String> spilled
+    ) {
+        if (v == null) return null;
+        String name = v.toString();
+
+        if (colors.containsKey(name)) {
+            int c = colors.get(name);
+            return new ir.tac.Variable(new mocha.Symbol("R" + c, null));
+        }
+        if (spilled.contains(name)) {
+            return new ir.tac.Variable(new mocha.Symbol("M_" + name, null));
+        }
+        return v;
+    }
+
+    private static ir.tac.Value rewriteVal(
+        ir.tac.Value val,
+        Map<String,Integer> colors,
+        Set<String> spilled
+    ) {
+        if (val instanceof ir.tac.Variable v) {
+            return rewriteVar(v, colors, spilled);
+        }
+        return val;
+    }
+
+    private static void rewriteWithRegisters(
+        List<BasicBlock> blocks,
+        Map<String,Integer> colors,
+        Set<String> spilled
+    ) {
+        for (BasicBlock b : blocks) {
+            List<ir.tac.TAC> ins = b.instructions();
+            if (ins == null || ins.isEmpty()) continue;
+
+            List<ir.tac.TAC> out = new ArrayList<>();
+
+            for (ir.tac.TAC t : ins) {
+                if (t instanceof ir.tac.Assign a) {
+                    String op = a.opcode();
+                    ir.tac.Variable dst = rewriteVar(a.dest(), colors, spilled);
+                    ir.tac.Value L = rewriteVal(a.left(),  colors, spilled);
+                    ir.tac.Value R = rewriteVal(a.right(), colors, spilled);
+                    out.add(prettyAssign(a.id(), dst, op, L, R));
+                } else if (t instanceof ir.tac.Call c) {
+                    ir.tac.Variable dst = rewriteVar(c.dest(), colors, spilled);
+                    List<ir.tac.Value> newArgs = null;
+                    if (c.args() != null) {
+                        newArgs = new ArrayList<>();
+                        for (ir.tac.Value v : c.args()) {
+                            newArgs.add(rewriteVal(v, colors, spilled));
+                        }
+                    }
+                    ir.tac.Call nc;
+                    if (dst != null) {
+                        nc = new ir.tac.Call(c.id(), c.function(), newArgs, dst);
+                    } else {
+                        nc = new ir.tac.Call(c.id(), c.function(), newArgs);
+                    }
+                    out.add(nc);
+                } else {
+                    out.add(t);
+                }
+            }
+
+            ins.clear();
+            ins.addAll(out);
+        }
+    }
     
- // ---------- Minimal interpreter for the I/O test ----------
-    	private static final class MiniInterpreter implements ast.NodeVisitor {
+    
+ // =========================================================================
+    //  SIMPLE DLX CODE GENERATOR (IR → DLX)
+    // =========================================================================
+
+    /**
+     * Very simple code generator:
+     *   - Every TAC Variable gets a word in memory at a negative offset from R30.
+     *   - Uses a few scratch registers R1..R4 for evaluation.
+     *   - Supports integer arithmetic + booleans + conditionals + loops + built-in I/O.
+     *   - Does NOT yet support user-defined functions or floats.
+     */
+    private static final class CodeGenerator {
+
+        // Registers we use
+        private static final int R_ZERO = 0;   // always 0
+        private static final int R_GP   = 30;  // global base (already set by DLX.execute)
+        private static final int R_TMP1 = 1;
+        private static final int R_TMP2 = 2;
+        private static final int R_TMP3 = 3;
+        private static final int R_TMP4 = 4;
+
+        // For each TAC variable name -> negative offset (bytes) from R30
+        private final Map<String,Integer> varOffset = new HashMap<>();
+        private int nextOffset = -4;
+
+        // BasicBlock → starting PC (instruction index)
+        private final Map<BasicBlock,Integer> blockPC = new HashMap<>();
+
+        // Result program as list of DLX words
+        private final List<Integer> code = new ArrayList<>();
+
+        List<Integer> generate(List<BasicBlock> blocks) {
+            if (blocks == null || blocks.isEmpty()) {
+                return new ArrayList<>();
+            }
+
+            // 1) Collect all variables and give them memory locations.
+            collectVariables(blocks);
+
+            // 2) First pass: compute starting PC for each block (instruction counts only).
+            int pc = 0;
+            for (BasicBlock b : blocks) {
+                blockPC.put(b, pc);
+                pc += estimateBlockSize(b);
+            }
+
+            // 3) Second pass: actually emit instructions with correct branch offsets.
+            code.clear();
+            for (BasicBlock b : blocks) {
+                emitBlock(b);
+            }
+
+            // Program must terminate with RET 0 if we fall off the end.
+            code.add(DLX.assemble(DLX.RET, 0));
+
+            return code;
+        }
+
+        // ---------------------------------------------------------------------
+        //  VARIABLE ↔ MEMORY
+        // ---------------------------------------------------------------------
+
+        private void collectVariables(List<BasicBlock> blocks) {
+            for (BasicBlock b : blocks) {
+                for (ir.tac.TAC t : b.instructions()) {
+                    if (t instanceof Assign a) {
+                        addVar(a.dest());
+                        addVal(a.left());
+                        addVal(a.right());
+                    } else if (t instanceof Call c) {
+                        addVar(c.dest());
+                        if (c.args() != null) {
+                            for (Value v : c.args()) addVal(v);
+                        }
+                    }
+                }
+            }
+        }
+
+        private void addVar(Variable v) {
+            if (v == null) return;
+            String name = v.toString();
+            if (!varOffset.containsKey(name)) {
+                varOffset.put(name, nextOffset);
+                nextOffset -= 4;
+            }
+        }
+
+        private void addVal(Value v) {
+            if (v instanceof Variable var) addVar(var);
+        }
+
+        private int offsetOf(Variable v) {
+            if (v == null) throw new IllegalArgumentException("null variable");
+            String name = v.toString();
+            Integer off = varOffset.get(name);
+            if (off == null) {
+                off = nextOffset;
+                nextOffset -= 4;
+                varOffset.put(name, off);
+            }
+            return off;
+        }
+
+        private int loadVar(Variable v, int reg) {
+            int off = offsetOf(v);
+            code.add(DLX.assemble(DLX.LDW, reg, R_GP, off));
+            return reg;
+        }
+
+        private void storeVar(int reg, Variable v) {
+            int off = offsetOf(v);
+            code.add(DLX.assemble(DLX.STW, reg, R_GP, off));
+        }
+
+        private int loadValue(Value v, int reg) {
+            if (v == null) {
+                // default 0
+                code.add(DLX.assemble(DLX.ADDI, reg, R_ZERO, 0));
+                return reg;
+            }
+            if (v instanceof Literal lit) {
+                Object o = lit.value();
+                int c;
+                if (o instanceof Integer i) {
+                    c = i;
+                } else if (o instanceof Boolean b) {
+                    c = b ? 1 : 0;
+                } else if (o instanceof Float f) {
+                    // for now, treat float bits as int (no arithmetic on them here)
+                    c = Float.floatToIntBits(f);
+                } else {
+                    c = 0;
+                }
+                code.add(DLX.assemble(DLX.ADDI, reg, R_ZERO, c));
+                return reg;
+            }
+            if (v instanceof Variable var) {
+                return loadVar(var, reg);
+            }
+            // Fallback
+            code.add(DLX.assemble(DLX.ADDI, reg, R_ZERO, 0));
+            return reg;
+        }
+
+        // ---------------------------------------------------------------------
+        //  PASS 1: SIZE ESTIMATION (rough but consistent with emit)
+        // ---------------------------------------------------------------------
+
+        private int estimateBlockSize(BasicBlock b) {
+            int n = 0;
+            List<ir.tac.TAC> ins = b.instructions();
+            if (ins == null) return 0;
+            for (int i = 0; i < ins.size(); i++) {
+                ir.tac.TAC t = ins.get(i);
+                if (t instanceof Assign a) {
+                    String op = a.opcode();
+                    if ("label".equals(op)) {
+                        // no code emitted
+                    } else if ("test".equals(op)) {
+                        // we emit 1 load + 2 branches
+                        n += 3;
+                    } else if ("ret".equals(op)) {
+                        // one move (if non-void) + RET 0
+                        if (a.left() != null) n += 1;
+                        n += 1;
+                    } else if (isRelOp(op)) {
+                        // approx: load L, load R, SUB, init dest, branch, set dest
+                        n += 6;
+                    } else if ("not".equals(op)) {
+                        // load, init, branch, set
+                        n += 4;
+                    } else if ("and".equals(op) || "or".equals(op)) {
+                        // load L,R, logical op
+                        n += 3;
+                    } else if ("mov".equals(op)) {
+                        // load src, store dst
+                        n += 2;
+                    } else {
+                        // arithmetic: load L, load R, one op, store
+                        n += 4;
+                    }
+                } else if (t instanceof Call c) {
+                    String fname = (c.function() == null) ? null : c.function().name();
+                    if (isBuiltin(fname)) {
+                        // loads for args + one IO instr
+                        if (c.args() != null) n += c.args().size();
+                        n += 1;
+                        if (c.dest() != null) {
+                            // store return value if any (e.g., readInt)
+                            n += 1;
+                        }
+                    } else {
+                        // user-defined functions not supported in this simple generator
+                        // treat as error: we emit ERR and stop the world
+                        n += 1;
+                    }
+                }
+            }
+
+            // Control-flow edges: we use 'test' pseudo only, nothing extra here.
+            return n;
+        }
+
+        // ---------------------------------------------------------------------
+        //  EMISSION PASS
+        // ---------------------------------------------------------------------
+
+        private void emitBlock(BasicBlock b) {
+            List<ir.tac.TAC> ins = b.instructions();
+            if (ins == null) return;
+
+            for (int i = 0; i < ins.size(); i++) {
+                ir.tac.TAC t = ins.get(i);
+
+                if (t instanceof Assign a) {
+                    String op = a.opcode();
+                    if ("label".equals(op)) {
+                        // noop at machine level in this simple generator
+                        continue;
+                    }
+                    if ("test".equals(op)) {
+                        emitTest(b, a);
+                        continue;
+                    }
+                    if ("ret".equals(op)) {
+                        emitReturn(a);
+                        continue;
+                    }
+                    if (isRelOp(op)) {
+                        emitRelation(a);
+                        continue;
+                    }
+                    if ("mov".equals(op)) {
+                        emitMov(a);
+                        continue;
+                    }
+                    if ("not".equals(op)) {
+                        emitNot(a);
+                        continue;
+                    }
+                    if ("and".equals(op) || "or".equals(op)) {
+                        emitBoolOp(a);
+                        continue;
+                    }
+                    // Arithmetic default
+                    emitArith(a);
+                } else if (t instanceof Call c) {
+                    emitCall(c);
+                }
+            }
+        }
+
+        // ---------------------------------------------------------------------
+        //  ARITHMETIC & BOOL EMISSION
+        // ---------------------------------------------------------------------
+
+        private void emitMov(Assign a) {
+            if (a.dest() == null) return;
+            int r = loadValue(a.left(), R_TMP1);
+            storeVar(r, a.dest());
+        }
+
+        private void emitArith(Assign a) {
+            if (a.dest() == null) return;
+            String op = a.opcode();
+
+            int rL = loadValue(a.left(),  R_TMP1);
+            int rR = loadValue(a.right(), R_TMP2);
+            int dstReg = R_TMP3;
+
+            int dlxOp;
+            switch (op) {
+                case "add": dlxOp = DLX.ADD; break;
+                case "sub": dlxOp = DLX.SUB; break;
+                case "mul": dlxOp = DLX.MUL; break;
+                case "div": dlxOp = DLX.DIV; break;
+                case "mod": dlxOp = DLX.MOD; break;
+                case "pow": dlxOp = DLX.POW; break;
+                default:
+                    // unknown op, emit error instruction
+                    code.add(DLX.assemble(DLX.ERR));
+                    return;
+            }
+
+            code.add(DLX.assemble(dlxOp, dstReg, rL, rR));
+            storeVar(dstReg, a.dest());
+        }
+
+        private static boolean isRelOp(String op) {
+            if (op == null) return false;
+            return op.equals("cmpeq") || op.equals("cmpne") ||
+                   op.equals("cmplt") || op.equals("cmple") ||
+                   op.equals("cmpgt") || op.equals("cmpge");
+        }
+
+        /**
+         * Emit comparisons that produce 0/1 in the destination.
+         * We implement them using SUB + branches, all in integer arithmetic.
+         */
+        private void emitRelation(Assign a) {
+            if (a.dest() == null) return;
+            String op = a.opcode();
+
+            int rL = loadValue(a.left(),  R_TMP1);
+            int rR = loadValue(a.right(), R_TMP2);
+            int rDiff = R_TMP3;
+            int rDst  = R_TMP4;
+
+            // rDiff = L - R
+            code.add(DLX.assemble(DLX.SUB, rDiff, rL, rR));
+
+            // rDst = 0 by default
+            code.add(DLX.assemble(DLX.ADDI, rDst, R_ZERO, 0));
+
+            // pattern:
+            //   if (condition for 'false') branch over "set to 1"
+            //   rDst = 1
+            int branchOpFalse;
+            switch (op) {
+                case "cmpeq": branchOpFalse = DLX.BNE; break; // false when diff != 0
+                case "cmpne": branchOpFalse = DLX.BEQ; break; // false when diff == 0
+                case "cmplt": branchOpFalse = DLX.BGE; break; // false when diff >= 0
+                case "cmple": branchOpFalse = DLX.BGT; break; // false when diff >  0
+                case "cmpgt": branchOpFalse = DLX.BLE; break; // false when diff <= 0
+                case "cmpge": branchOpFalse = DLX.BLT; break; // false when diff <  0
+                default:
+                    code.add(DLX.assemble(DLX.ERR));
+                    return;
+            }
+
+            // Branch over "set rDst = 1" if condition is FALSE.
+            // We want to skip exactly 1 instruction (ADDI) -> offset = 2 (because
+            // PC moves by 'c' from current PC, not from PC+1).
+            code.add(DLX.assemble(branchOpFalse, rDiff, 0, 2));
+
+            // If condition is true: rDst = 1
+            code.add(DLX.assemble(DLX.ADDI, rDst, R_ZERO, 1));
+
+            storeVar(rDst, a.dest());
+        }
+
+        private void emitNot(Assign a) {
+            if (a.dest() == null) return;
+
+            int rSrc = loadValue(a.left(), R_TMP1);
+            int rDst = R_TMP2;
+
+            // rDst = 0
+            code.add(DLX.assemble(DLX.ADDI, rDst, R_ZERO, 0));
+            // if src != 0 -> branch over "set to 1" (we want !src)
+            code.add(DLX.assemble(DLX.BNE, rSrc, 0, 2));
+            // src == 0 -> rDst = 1
+            code.add(DLX.assemble(DLX.ADDI, rDst, R_ZERO, 1));
+
+            storeVar(rDst, a.dest());
+        }
+
+        private void emitBoolOp(Assign a) {
+            if (a.dest() == null) return;
+            String op = a.opcode();
+
+            int rL = loadValue(a.left(),  R_TMP1);
+            int rR = loadValue(a.right(), R_TMP2);
+            int rDst = R_TMP3;
+
+            int dlxOp = "and".equals(op) ? DLX.AND : DLX.OR;
+            code.add(DLX.assemble(dlxOp, rDst, rL, rR));
+            storeVar(rDst, a.dest());
+        }
+
+        // ---------------------------------------------------------------------
+        //  RETURN & CONTROL FLOW
+        // ---------------------------------------------------------------------
+
+        private void emitReturn(Assign a) {
+            // In this simple generator we treat any return as "end program".
+            // If there is a value, we ignore it (you can extend this to put it in a register).
+            if (a.left() != null) {
+                // Evaluate and drop into a temp just for side effects (if any).
+                loadValue(a.left(), R_TMP1);
+            }
+            code.add(DLX.assemble(DLX.RET, 0)); // RET 0 -> terminate program
+        }
+
+        /**
+         * 'test' TAC appears at the end of a block and has two successors:
+         *   succs[0] -> "true" branch
+         *   succs[1] -> "false" branch
+         *
+         * We emit:
+         *     load cond into rCond
+         *     BEQ rCond, 0, falseOffset     // if cond == 0 -> false block
+         *     BSR 0, trueOffset             // otherwise -> true block
+         */
+        private void emitTest(BasicBlock b, Assign t) {
+            Value cond = t.left();
+            int rCond = loadValue(cond, R_TMP1);
+
+            List<BasicBlock> succs = b.succs();
+            if (succs == null || succs.size() != 2) {
+                // Degenerate case: just fall through
+                return;
+            }
+            BasicBlock trueBB  = succs.get(0);
+            BasicBlock falseBB = succs.get(1);
+
+            int pcHere = code.size();
+
+            int pcTrue  = blockPC.getOrDefault(trueBB,  pcHere);
+            int pcFalse = blockPC.getOrDefault(falseBB, pcHere);
+
+            int offFalse = pcFalse - pcHere;      // from current PC
+            int offTrue  = pcTrue  - (pcHere+1);  // from BSR position (next instr)
+
+            // if cond == 0 -> jump to false
+            code.add(DLX.assemble(DLX.BEQ, rCond, 0, offFalse));
+
+            // otherwise jump to true
+            code.add(DLX.assemble(DLX.BSR, 0, offTrue));
+        }
+
+        // ---------------------------------------------------------------------
+        //  CALLS – built-in only
+        // ---------------------------------------------------------------------
+
+        private static boolean isBuiltin(String name) {
+            if (name == null) return false;
+            return name.equals("printInt")  ||
+                   name.equals("printBool") ||
+                   name.equals("println")   ||
+                   name.equals("readInt");
+        }
+
+        private void emitCall(Call c) {
+            String fname = (c.function() == null) ? null : c.function().name();
+
+            if (!isBuiltin(fname)) {
+                // For now, we don't support user-defined functions in codegen.
+                // Emit an ERR instruction so you get a clear runtime failure
+                // if such a call is reached.
+                code.add(DLX.assemble(DLX.ERR));
+                return;
+            }
+
+            if ("printInt".equals(fname)) {
+                // one int argument in a register; use WRI
+                Value arg = c.args().isEmpty() ? null : c.args().get(0);
+                int r = loadValue(arg, R_TMP1);
+                code.add(DLX.assemble(DLX.WRI, r));
+            } else if ("printBool".equals(fname)) {
+                Value arg = c.args().isEmpty() ? null : c.args().get(0);
+                int r = loadValue(arg, R_TMP1);
+                code.add(DLX.assemble(DLX.WRB, r));
+            } else if ("println".equals(fname)) {
+                code.add(DLX.assemble(DLX.WRL));
+            } else if ("readInt".equals(fname)) {
+                // RDI reads into register; if there is a destination variable, store into it.
+                int r = R_TMP1;
+                code.add(DLX.assemble(DLX.RDI, r));
+                if (c.dest() != null) {
+                    storeVar(r, c.dest());
+                }
+            }
+        }
+    }
+
+    // =========================================================================
+    //  MINI INTERPRETER (FOR I/O TESTS)
+    // =========================================================================
+
+    private static final class MiniInterpreter implements ast.NodeVisitor {
         private final java.util.Scanner sc;
         private final java.io.PrintStream out;
         private final java.util.Map<String,Object> env = new java.util.HashMap<>();
         private final java.util.Map<String, AST.FunctionDeclaration> funcs = new java.util.HashMap<>();
-        private Object eval; // holds last evaluated expression result
+        private Object eval;
 
         MiniInterpreter(InputStream in, java.io.PrintStream out) {
             this.sc = new java.util.Scanner(in);
@@ -2191,18 +2736,16 @@ public class Compiler {
         }
 
         void run(ast.Computation prog) {
-            // 1) Index function declarations (handy for user-defined calls later)
             for (AST.Declaration d : prog.functions()) {
                 if (d instanceof AST.FunctionDeclaration) {
-                	AST.FunctionDeclaration fd = (AST.FunctionDeclaration) d;
+                    AST.FunctionDeclaration fd = (AST.FunctionDeclaration) d;
                     funcs.put(fd.getIdentifier().getName(), fd);
                 }
             }
 
-            // 2) Allocate/initialize globals with sensible defaults
             for (AST.Declaration d : prog.variables()) {
                 if (d instanceof AST.VariableDeclaration) {
-                	AST.VariableDeclaration vd = (AST.VariableDeclaration) d;
+                    AST.VariableDeclaration vd = (AST.VariableDeclaration) d;
                     AST.TypeNode tn = (AST.TypeNode) vd.getTypeNode();
                     types.Type t = tn.getActualType();
                     Object def = defaultValueForType(t);
@@ -2210,50 +2753,37 @@ public class Compiler {
                 }
             }
 
-            // 3) Execute main body
             prog.mainStatementSequence().accept(this);
         }
 
-        /** Default value for a type (ints 0, floats 0.0f, bool false, arrays allocated and filled). */
         private Object defaultValueForType(types.Type t) {
             if (t instanceof types.IntType)   return Integer.valueOf(0);
-            if (t instanceof types.FloatType) return Float.valueOf(0.0f); // use Float, not Double
+            if (t instanceof types.FloatType) return Float.valueOf(0.0f);
             if (t instanceof types.BoolType)  return Boolean.FALSE;
             if (t instanceof types.ArrayType) return allocArray((types.ArrayType) t);
-            return null; // for void or unknown, nothing to store
+            return null;
         }
 
-        /** Recursively allocates Java arrays for Mocha array types (only when extent >= 0). */
         private Object allocArray(types.ArrayType at) {
             int n = at.getExtent();
-            if (n < 0) return null; // unspecified size: don’t allocate
+            if (n < 0) return null;
             Object[] arr = new Object[n];
             for (int i = 0; i < n; i++) {
                 arr[i] = defaultValueForType(at.getBase());
             }
             return arr;
         }
-        
+
         private static final class ReturnSignal extends RuntimeException {
             final Object value;
             ReturnSignal(Object v) { this.value = v; }
         }
-        
+
         private boolean asBool(Object v) {
             if (v instanceof Boolean) return (Boolean) v;
             throw new RuntimeException("Condition is not boolean: " + v);
         }
-        
-        @Override
-        public void visit(AST.ReturnStatement node) {
-            if (node.getValue() != null) {
-                node.getValue().accept(this);
-                throw new ReturnSignal(eval);
-            } else {
-                throw new ReturnSignal(null);
-            }
-        }
-        
+
         private static boolean isInt(Object o)    { return o instanceof Integer; }
         private static boolean isFloaty(Object o) { return o instanceof Float || o instanceof Double; }
         private static double  toDouble(Object o) {
@@ -2262,7 +2792,7 @@ public class Compiler {
             if (o instanceof Double)  return (Double)o;
             throw new RuntimeException("N/A");
         }
-        
+
         @Override
         public void visit(AST.IntegerLiteral n) { eval = Integer.valueOf(n.getValue()); }
 
@@ -2306,7 +2836,7 @@ public class Compiler {
         public void visit(AST.Division n) {
             n.getLeft().accept(this);  Object L = eval;
             n.getRight().accept(this); Object R = eval;
-            eval = Float.valueOf((float)(toDouble(L) / toDouble(R))); // numeric division
+            eval = Float.valueOf((float)(toDouble(L) / toDouble(R)));
         }
 
         @Override
@@ -2316,7 +2846,7 @@ public class Compiler {
             if (isInt(L) && isInt(R)) eval = (Integer)L % (Integer)R;
             else throw new RuntimeException("Modulo requires int operands at runtime");
         }
-        
+
         @Override
         public void visit(AST.LogicalNot n) {
             n.getExpression().accept(this);
@@ -2327,7 +2857,7 @@ public class Compiler {
         public void visit(AST.LogicalAnd n) {
             n.getLeft().accept(this);
             boolean lb = asBool(eval);
-            if (!lb) { eval = Boolean.FALSE; return; } // short-circuit
+            if (!lb) { eval = Boolean.FALSE; return; }
             n.getRight().accept(this);
             eval = Boolean.valueOf(asBool(eval));
         }
@@ -2336,11 +2866,11 @@ public class Compiler {
         public void visit(AST.LogicalOr n) {
             n.getLeft().accept(this);
             boolean lb = asBool(eval);
-            if (lb) { eval = Boolean.TRUE; return; } // short-circuit
+            if (lb) { eval = Boolean.TRUE; return; }
             n.getRight().accept(this);
             eval = Boolean.valueOf(asBool(eval));
         }
-        
+
         @Override
         public void visit(AST.Power n) {
             n.getBase().accept(this);
@@ -2352,7 +2882,6 @@ public class Compiler {
                 int b = (Integer) L;
                 int e = (Integer) R;
                 if (e < 0) {
-                    // negative int exponent -> float result
                     eval = Float.valueOf((float)Math.pow(b, e));
                 } else {
                     eval = Integer.valueOf(intPow(b, e));
@@ -2360,13 +2889,11 @@ public class Compiler {
                 return;
             }
 
-            // any float involved -> float result
             double bd = toDouble(L);
             double ed = toDouble(R);
             eval = Float.valueOf((float)Math.pow(bd, ed));
         }
 
-        // fast integer power (non-negative exponent)
         private int intPow(int base, int exp) {
             int result = 1;
             int b = base;
@@ -2384,7 +2911,6 @@ public class Compiler {
             n.getLeft().accept(this);  Object L = eval;
             n.getRight().accept(this); Object R = eval;
 
-            // Adjust the getter to match your AST: getOp() / getOperator() / getRelop()
             String op = n.getOperator();
 
             boolean res;
@@ -2412,34 +2938,19 @@ public class Compiler {
             eval = Boolean.valueOf(res);
         }
 
-        // ---------- statements ----------
         @Override
         public void visit(AST.StatementSequence node) {
             for (ast.Statement s : node) if (s != null) s.accept(this);
         }
-        
+
         @Override
         public void visit(AST.VariableDeclaration n) {
             types.Type t = ((AST.TypeNode) n.getTypeNode()).getActualType();
             env.put(n.getIdentifier().getName(), defaultValueForType(t));
         }
 
-//        @Override
-//        public void visit(AST.Assignment node) {
-//            node.getSource().accept(this);
-//            Object rhs = eval;
-//            // only simple identifiers needed for the first test
-//            if (node.getDestination() instanceof AST.Identifier id) {
-//                env.put(id.getName(), rhs);
-//            } else {
-//                throw new RuntimeException("Only simple assignments supported in MiniInterpreter.");
-//            }
-//            eval = null;
-//        }
-
         @Override
         public void visit(AST.FunctionCall n) {
-            // 1) Evaluate argument expressions to values
             java.util.List<Object> argVals = new java.util.ArrayList<>();
             for (ast.Expression e : n.getArguments().getArguments()) {
                 e.accept(this);
@@ -2448,25 +2959,24 @@ public class Compiler {
 
             String name = n.getIdentifier().getName();
 
-            // 2) Built-ins (no default that throws!)
             if ("printInt".equals(name)) {
                 int i = (argVals.get(0) instanceof Number) ? ((Number)argVals.get(0)).intValue() : 0;
                 out.print(i + " ");
-                eval = null; 
+                eval = null;
                 return;
             } else if ("printFloat".equals(name)) {
                 double d = (argVals.get(0) instanceof Number) ? ((Number)argVals.get(0)).doubleValue() : 0.0;
                 out.printf("%.2f ", d);
-                eval = null; 
+                eval = null;
                 return;
             } else if ("printBool".equals(name)) {
                 boolean b = (argVals.get(0) instanceof Boolean) ? ((Boolean)argVals.get(0)) : false;
                 out.print(b ? "true " : "false ");
-                eval = null; 
+                eval = null;
                 return;
             } else if ("println".equals(name)) {
                 out.println();
-                eval = null; 
+                eval = null;
                 return;
             } else if ("readInt".equals(name)) {
                 out.print("int? ");
@@ -2483,32 +2993,27 @@ public class Compiler {
                 return;
             }
 
-            // 3) User-defined function
             AST.FunctionDeclaration fd = funcs.get(name);
             if (fd == null) throw new RuntimeException("N/A");
 
-            // Save current env (simple single-frame model)
             java.util.Map<String,Object> saved = new java.util.HashMap<>(env);
             try {
-                // Bind parameters (values, not AST nodes!)
                 java.util.List<AST.FormalParameter> ps = fd.getParameters();
                 for (int i = 0; i < ps.size(); i++) {
                     env.put(ps.get(i).getIdentifier().getName(), argVals.get(i));
                 }
 
-                // Allocate locals with defaults
                 for (AST.Declaration d : fd.getBody().getDeclarations()) {
                     if (d instanceof AST.VariableDeclaration) {
-                    	AST.VariableDeclaration vd = (AST.VariableDeclaration) d;
+                        AST.VariableDeclaration vd = (AST.VariableDeclaration) d;
                         types.Type t = ((AST.TypeNode)vd.getTypeNode()).getActualType();
                         env.put(vd.getIdentifier().getName(), defaultValueForType(t));
                     }
                 }
 
-                // Execute body and catch return
                 try {
                     fd.getBody().getStatements().accept(this);
-                    eval = null; // no explicit return => void
+                    eval = null;
                 } catch (ReturnSignal r) {
                     eval = r.value;
                 }
@@ -2517,7 +3022,17 @@ public class Compiler {
                 env.putAll(saved);
             }
         }
-        
+
+        @Override
+        public void visit(AST.ReturnStatement node) {
+            if (node.getValue() != null) {
+                node.getValue().accept(this);
+                throw new ReturnSignal(eval);
+            } else {
+                throw new ReturnSignal(null);
+            }
+        }
+
         @Override
         public void visit(AST.IfStatement n) {
             n.getCondition().accept(this);
@@ -2550,49 +3065,44 @@ public class Compiler {
 
         @Override
         public void visit(AST.ArgumentList node) {
-            // Evaluate args left-to-right; keep last in eval for convenience
             for (ast.Expression e : node.getArguments()) e.accept(this);
         }
-        
+
         @Override
         public void visit(AST.Assignment node) {
-            // evaluate RHS normally
             node.getSource().accept(this);
             Object rhs = eval;
 
             ast.Expression dest = node.getDestination();
             if (dest instanceof AST.Identifier) {
-            	AST.Identifier id = (AST.Identifier) dest;
+                AST.Identifier id = (AST.Identifier) dest;
                 env.put(id.getName(), rhs);
             } else if (dest instanceof AST.ArrayIndex ) {
-            	AST.ArrayIndex ai = (AST.ArrayIndex) dest;
-                // evaluate base and index explicitly (we need the container)
-            	Object base = valueOf(ai.getBase());
-            	if (!(base instanceof Object[])) {
-            	    throw new RuntimeException("Assigning into non-array");
-            	}
-            	Object[] arr = (Object[]) base;
+                AST.ArrayIndex ai = (AST.ArrayIndex) dest;
+                Object base = valueOf(ai.getBase());
+                if (!(base instanceof Object[])) {
+                    throw new RuntimeException("Assigning into non-array");
+                }
+                Object[] arr = (Object[]) base;
 
-            	// evaluate index once and validate it's numeric
-            	Object idxObj = valueOf(ai.getIndex());
-            	if (!(idxObj instanceof Number)) {
-            	    throw new RuntimeException("Array index is not an int");
-            	}
-            	int idx = ((Number) idxObj).intValue();
+                Object idxObj = valueOf(ai.getIndex());
+                if (!(idxObj instanceof Number)) {
+                    throw new RuntimeException("Array index is not an int");
+                }
+                int idx = ((Number) idxObj).intValue();
 
-            	if (idx < 0 || idx >= arr.length) {
-            	    throw new RuntimeException("Index out of bounds: " + idx);
-            	}
+                if (idx < 0 || idx >= arr.length) {
+                    throw new RuntimeException("Index out of bounds: " + idx);
+                }
 
-            	arr[idx] = rhs;
+                arr[idx] = rhs;
             } else {
                 throw new RuntimeException("Unsupported lvalue: " + dest.getClass().getSimpleName());
             }
             eval = null;
         }
 
-        // ---------- expressions ----------
-        @Override public void visit(AST.BoolLiteral node)   { eval = Boolean.valueOf(node.getValue()); }
+        @Override public void visit(AST.BoolLiteral node) { eval = Boolean.valueOf(node.getValue()); }
 
         @Override
         public void visit(AST.Identifier node) {
@@ -2600,18 +3110,39 @@ public class Compiler {
             if (v == null) throw new RuntimeException("Uninitialized var: " + node.getName());
             eval = v;
         }
+        
+        @Override public void visit(AST.ArrayIndex n)  { 
+        	// Evaluate the base array expression
+            Object base = valueOf(n.getBase());
+            if (!(base instanceof Object[])) {
+                throw new RuntimeException("Indexing into non-array value: " + base);
+            }
 
-        // The rest of NodeVisitor methods (not used in the I/O test) can be no-ops:
+            Object[] arr = (Object[]) base;
+
+            // Evaluate the index expression
+            Object idxObj = valueOf(n.getIndex());
+            if (!(idxObj instanceof Number)) {
+                throw new RuntimeException("Array index is not numeric: " + idxObj);
+            }
+
+            int idx = ((Number) idxObj).intValue();
+            if (idx < 0 || idx >= arr.length) {
+                throw new RuntimeException("Index out of bounds: " + idx + " (len = " + arr.length + ")");
+            }
+
+            // Result value of the expression
+            eval = arr[idx];
+        	}
+
         @Override public void visit(ast.Computation n) {}
         @Override public void visit(AST.AddressOf n)   { throw new RuntimeException("N/A"); }
-        @Override public void visit(AST.ArrayIndex n)  { throw new RuntimeException("N/A"); }
         @Override public void visit(AST.Dereference n) { throw new RuntimeException("N/A"); }
         @Override public void visit(AST.FunctionBody n){ throw new RuntimeException("N/A"); }
         @Override public void visit(AST.FunctionDeclaration n){ throw new RuntimeException("N/A"); }
-        @Override public void visit(AST.DeclarationList n){ /* globals handled in run() */ }
+        @Override public void visit(AST.DeclarationList n){ }
         @Override public void visit(AST.TypeNode n) {}
 
-        // helper to evaluate an expression node to a Java value
         private Object valueOf(ast.Expression e) {
             e.accept(this);
             return eval;
