@@ -61,24 +61,60 @@ public class FunctionInliner {
 
     private void buildFunctionMap(List<BasicBlock> blocks) {
         functionMap.clear();
-        String currentFuncName = null;
-        List<BasicBlock> currentBody = null;
 
+        // 1) Find entry block for each function from the IR labels
+        Map<String, BasicBlock> entryBlocks = new HashMap<>();
         for (BasicBlock bb : blocks) {
             List<TAC> ins = bb.instructions();
-            if (!ins.isEmpty() && ins.get(0) instanceof Assign a && "label".equals(a.opcode())) {
-                if (currentFuncName != null) {
-                    functionMap.put(currentFuncName, currentBody);
+            if (ins == null || ins.isEmpty()) continue;
+
+            TAC first = ins.get(0);
+            if (first instanceof Assign a && "label".equals(a.opcode())) {
+                String name = a.dest().toString();   // usually the function name
+                if (astFuncs.containsKey(name)) {    // only care about real functions
+                    entryBlocks.put(name, bb);
                 }
-                currentFuncName = a.dest().toString();
-                currentBody = new ArrayList<>();
-            }
-            if (currentBody != null) {
-                currentBody.add(bb);
             }
         }
-        if (currentFuncName != null) {
-            functionMap.put(currentFuncName, currentBody);
+
+        // 2) For each function, BFS/DFS from its entry, staying inside that function
+        for (Map.Entry<String, AST.FunctionDeclaration> e : astFuncs.entrySet()) {
+            String fname = e.getKey();
+            BasicBlock entry = entryBlocks.get(fname);
+            if (entry == null) {
+                // No label block for this function in IR – skip
+                continue;
+            }
+
+            Set<BasicBlock> visited = new LinkedHashSet<>();
+            Deque<BasicBlock> work = new ArrayDeque<>();
+            visited.add(entry);
+            work.add(entry);
+
+            while (!work.isEmpty()) {
+                BasicBlock b = work.removeFirst();
+
+                for (BasicBlock s : b.succs()) {
+                    if (s == null || visited.contains(s)) continue;
+
+                    List<TAC> sins = s.instructions();
+                    if (sins != null && !sins.isEmpty()) {
+                        TAC first = sins.get(0);
+                        if (first instanceof Assign a && "label".equals(a.opcode())) {
+                            String otherName = a.dest().toString();
+                            // Don't walk into *other* function entries
+                            if (!otherName.equals(fname)) {
+                                continue;
+                            }
+                        }
+                    }
+
+                    visited.add(s);
+                    work.addLast(s);
+                }
+            }
+
+            functionMap.put(fname, new ArrayList<>(visited));
         }
     }
 

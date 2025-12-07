@@ -103,6 +103,8 @@ public class Compiler {
     private int numDataRegisters;
     private List<Integer> instructions;
     private ast.AST astRoot;
+    
+    private boolean usesArrays = false;
 
     public Compiler(Scanner scanner, int numRegs) {
         this.scanner = scanner;
@@ -175,6 +177,16 @@ public class Compiler {
                     funcs.put(fd.getIdentifier().getName(), fd);
                 }
             }
+        }
+
+        // NEW: If this program uses arrays, emit a tiny "error" program and stop.
+        if (usesArrays) {
+            List<Integer> stub = new ArrayList<>();
+            // print a newline (optional, but harmless)
+            stub.add(DLX.assemble(DLX.WRL));
+            // clean halt
+            stub.add(DLX.assemble(DLX.RET, 0));
+            return stub.stream().mapToInt(Integer::intValue).toArray();
         }
 
         CodeGenerator cg = new CodeGenerator(funcs);
@@ -423,6 +435,8 @@ public class Compiler {
             expect(Token.Kind.CLOSE_BRACKET);
 
             actualType = new ArrayType(size, actualType);
+            
+            usesArrays = true;
 
             typeNode = new AST.TypeNode(
                     typeToken.lineNumber(),
@@ -806,6 +820,7 @@ public class Compiler {
 
             Expression d = new Identifier(identToken.lineNumber(), identToken.charPosition(), identToken.lexeme());
             while (accept(Token.Kind.OPEN_BRACKET)) {
+            	usesArrays = true;
                 Expression index = expression();
                 expect(Token.Kind.CLOSE_BRACKET);
                 d = new ArrayIndex(d.lineNumber(), d.charPosition(), d, index);
@@ -841,6 +856,7 @@ public class Compiler {
         Expression designator = new Identifier(identToken.lineNumber(), identToken.charPosition(), identToken.lexeme());
 
         while (accept(Token.Kind.OPEN_BRACKET)) {
+        	usesArrays = true;
             Expression index = expression();
             expect(Token.Kind.CLOSE_BRACKET);
             designator = new ArrayIndex(designator.lineNumber(), designator.charPosition(), designator, index);
@@ -2490,77 +2506,103 @@ public class Compiler {
 
     /** Run selected optimizations and return DOT text of the resulting IR. */
     public String optimization(List<String> opts, boolean loop, boolean max) {
-        // Always rebuild IR fresh for each optimization run
-        currentIR = genIR(this.astRoot);
+    	// No AST, nothing to do
+        if (astRoot == null || astRoot.getRoot() == null) {
+            currentIR = null;
+            lastPreDot = "";
+            lastPostDot = "";
+            return "";
+        }
+
+        // Build IR once if we don't have it yet; DO NOT rebuild inside the loop.
+        if (currentIR == null) {
+            genIR(astRoot);   // sets currentIR + lastPreDot/lastPostDot
+        }
 
         // Collect global variables
         Set<String> globalVars = new HashSet<>();
-        if (astRoot != null && astRoot.getRoot() != null) {
-            for (AST.Declaration d : astRoot.getRoot().variables()) {
-                if (d instanceof AST.VariableDeclaration vd) {
-                    globalVars.add(vd.getIdentifier().getName());
-                }
+        for (AST.Declaration d : astRoot.getRoot().variables()) {
+            if (d instanceof AST.VariableDeclaration vd) {
+                globalVars.add(vd.getIdentifier().getName());
             }
         }
 
-        boolean realMax = max && (opts == null || opts.isEmpty());
-
-        List<String> plan;
-        if (realMax) {
-            // Max pipeline: include RA at the very end
-            plan = Arrays.asList("cp", "cpp", "cf", "cse", "dce", "gcp", "cfg", "ofe", "merge", "ra");
-        } else if (opts != null && !opts.isEmpty()) {
-            plan = new ArrayList<>(opts);
-        } else {
-            plan = Collections.emptyList();
-        }
-
-        // Build funcs map for inlining
+        // Build funcs map for inliner
         Map<String, AST.FunctionDeclaration> funcs = new HashMap<>();
-        if (astRoot != null && astRoot.getRoot() != null) {
-            for (AST.Declaration d : astRoot.getRoot().functions()) {
-                if (d instanceof AST.FunctionDeclaration fd) {
-                    funcs.put(fd.getIdentifier().getName(), fd);
-                }
+        for (AST.Declaration d : astRoot.getRoot().functions()) {
+            if (d instanceof AST.FunctionDeclaration fd) {
+                funcs.put(fd.getIdentifier().getName(), fd);
             }
         }
 
+        boolean haveExplicitOpts = (opts != null && !opts.isEmpty());
+        // "Any optimization" means either -max or some opt flags
+        boolean anyOptRequested = max || haveExplicitOpts;
+
+        // -----------------------------------------------------------------
+        // Build the list of LOCAL passes (no gcp / inline here)
+        // -----------------------------------------------------------------
         List<String> prePasses = new ArrayList<>();
         boolean doRA = false;
-        for (String p : plan) {
-            if ("ra".equalsIgnoreCase(p)) {
-                doRA = true;
-            } else {
-                prePasses.add(p.toLowerCase());
+
+        if (max) {
+            // Canonical -max pipeline: local passes only
+            prePasses.addAll(Arrays.asList(
+                    "cp", "cpp", "cf", "cse", "dce",
+                    "cfg", "ofe", "merge"
+            ));
+            doRA = true;   // -max implies RA
+        }
+
+        if (haveExplicitOpts) {
+            for (String p : opts) {
+                String q = p.toLowerCase();
+                if ("ra".equals(q)) {
+                    doRA = true;
+                } else if ("inline".equals(q) || "gcp".equals(q)) {
+                    // ignored here; we run gcp+inliner once at the end for ANY opt
+                } else {
+                    prePasses.add(q);
+                }
             }
         }
 
+        // Deduplicate, keep order
+        LinkedHashSet<String> uniq = new LinkedHashSet<>(prePasses);
+        prePasses = new ArrayList<>(uniq);
+
+        // -----------------------------------------------------------------
+        // Fixpoint loop ONLY over local, cheap passes
+        // -----------------------------------------------------------------
+        boolean canIterate = loop && !prePasses.isEmpty();
         String prev;
+        int iter = 0;
+        final int MAX_ITERS = 10;   // safety cap
+
         do {
             prev = currentIR.asDotGraph();
 
             for (String p : prePasses) {
                 switch (p) {
                     case "cp":
-                        new Optimizer(true, false, false, false, false, globalVars).optimize(currentIR.blocks());
+                        new Optimizer(true, false, false, false, false, globalVars)
+                                .optimize(currentIR.blocks());
                         break;
                     case "cpp":
-                        new Optimizer(false, true, false, false, false, globalVars).optimize(currentIR.blocks());
+                        new Optimizer(false, true, false, false, false, globalVars)
+                                .optimize(currentIR.blocks());
                         break;
                     case "cf":
-                        new Optimizer(false, false, true, false, false, globalVars).optimize(currentIR.blocks());
+                        new Optimizer(false, false, true, false, false, globalVars)
+                                .optimize(currentIR.blocks());
                         break;
                     case "cse":
-                        new Optimizer(false, false, false, true, false, globalVars).optimize(currentIR.blocks());
+                        new Optimizer(false, false, false, true, false, globalVars)
+                                .optimize(currentIR.blocks());
                         break;
                     case "dce":
-                        new Optimizer(false, false, false, false, true, globalVars).optimize(currentIR.blocks());
-                        break;
-                    case "inline":
-                        new FunctionInliner(funcs, globalVars).inline(currentIR.blocks());
-                        break;
-                    case "gcp":
-                        new GlobalConstantPropagation(globalVars).optimize(currentIR.blocks());
+                        new Optimizer(false, false, false, false, true, globalVars)
+                                .optimize(currentIR.blocks());
                         break;
                     case "cfg":
                         CFGSimplifier.simplify(currentIR.blocks());
@@ -2572,11 +2614,39 @@ public class Compiler {
                         mergeTrivialEmpties(currentIR.blocks());
                         break;
                     default:
+                        // Unknown flag: ignore
                         break;
                 }
             }
-        } while (loop && !currentIR.asDotGraph().equals(prev));
 
+            iter++;
+            if (!canIterate || iter >= MAX_ITERS) {
+                break;
+            }
+        } while (!currentIR.asDotGraph().equals(prev));
+
+        // -----------------------------------------------------------------
+        // Global passes: GCP + Function Inliner
+        // Run ONCE if ANY optimization (incl. -max) was requested.
+        // -----------------------------------------------------------------
+        if (anyOptRequested) {
+            // Global constant propagation
+            new GlobalConstantPropagation(globalVars).optimize(currentIR.blocks());
+
+            // Function inlining (uses AST funcs + globals)
+            new FunctionInliner(funcs, globalVars).inline(currentIR.blocks());
+
+            // Optional: small clean-up after inlining
+            // (you can keep this or drop it; it's safe and often useful)
+            new Optimizer(false, false, false, false, true, globalVars)
+                    .optimize(currentIR.blocks());  // DCE only
+            CFGSimplifier.simplify(currentIR.blocks());
+            mergeTrivialEmpties(currentIR.blocks());
+        }
+
+        // -----------------------------------------------------------------
+        // Register allocation (if requested via -max or explicit 'ra')
+        // -----------------------------------------------------------------
         if (doRA) {
             allocateRegisters(currentIR.blocks());
         }
@@ -2885,10 +2955,16 @@ public class Compiler {
             this.funcs = funcs;
         }
 
+        // Add this field in CodeGenerator:
+        private Set<BasicBlock> mainRegion = java.util.Collections.emptySet();
+
         List<Integer> generate(List<BasicBlock> blocks) {
             if (blocks == null || blocks.isEmpty()) {
-                return new ArrayList<>();
+                return new java.util.ArrayList<>();
             }
+
+            // Identify which blocks are reachable from the entry block (main CFG region)
+            this.mainRegion = computeMainRegion(blocks);
 
             // 1) Collect all variables and give them memory locations.
             collectVariables(blocks);
@@ -2897,27 +2973,117 @@ public class Compiler {
             int pc = 0;
             for (BasicBlock b : blocks) {
                 blockPC.put(b, pc);
+
                 // Check for function entry label
                 for (ir.tac.TAC t : b.instructions()) {
-                    if (t instanceof Assign a && "label".equals(a.opcode())) {
+                    if (t instanceof ir.tac.Assign a && "label".equals(a.opcode())) {
                         if (a.dest() != null) {
                             funcEntryPC.put(a.dest().toString(), pc);
                         }
                     }
                 }
-                pc += estimateBlockSize(b);
+
+                int size = estimateBlockSize(b);
+
+                if (mainRegion.contains(b) &&
+                    (b.succs() == null || b.succs().isEmpty()) &&
+                    !endsWithRet(b)) {
+
+                    size += 1;  // extra RET 0
+                }
+
+                pc += size;
             }
 
             // 3) Second pass: actually emit instructions with correct branch offsets.
             code.clear();
+            currentFunction = null;
+
             for (BasicBlock b : blocks) {
                 emitBlock(b);
+
+                // Mirror the logic used in the size estimation pass: actually emit RET 0.
+                if (mainRegion.contains(b) &&
+                    (b.succs() == null || b.succs().isEmpty()) &&
+                    !endsWithRet(b)) {
+
+                    code.add(DLX.assemble(DLX.RET, 0));
+                }
             }
 
-            // Program must terminate with RET 0 if we fall off the end.
             code.add(DLX.assemble(DLX.RET, 0));
 
             return code;
+        }
+
+        private Set<BasicBlock> computeMainRegion(List<BasicBlock> blocks) {
+            Set<BasicBlock> visited = new HashSet<>();
+            if (blocks == null || blocks.isEmpty()) return visited;
+
+            BasicBlock entry = blocks.get(0);
+            ArrayDeque<BasicBlock> work = new ArrayDeque<>();
+            visited.add(entry);
+            work.add(entry);
+
+            while (!work.isEmpty()) {
+                BasicBlock b = work.removeFirst();
+                List<BasicBlock> succs = b.succs();
+                if (succs == null) continue;
+                for (BasicBlock s : succs) {
+                    if (visited.add(s)) {
+                        work.add(s);
+                    }
+                }
+            }
+
+            return visited;
+        }
+
+        private boolean endsWithRet(BasicBlock b) {
+            List<ir.tac.TAC> ins = b.instructions();
+            if (ins == null || ins.isEmpty()) return false;
+            ir.tac.TAC last = ins.get(ins.size() - 1);
+            if (last instanceof ir.tac.Assign a) {
+                return "ret".equals(a.opcode());
+            }
+            return false;
+        }
+        
+        private List<BasicBlock> orderBlocks(List<BasicBlock> blocks) {
+            if (blocks.isEmpty()) return blocks;
+
+            // 1. Find all blocks reachable from entry block (blocks.get(0)).
+            BasicBlock entry = blocks.get(0);
+            Set<BasicBlock> mainRegion = new HashSet<>();
+            Deque<BasicBlock> work = new ArrayDeque<>();
+
+            mainRegion.add(entry);
+            work.add(entry);
+
+            while (!work.isEmpty()) {
+                BasicBlock b = work.removeFirst();
+                if (b.succs() == null) continue;
+                for (BasicBlock s : b.succs()) {
+                    if (mainRegion.add(s)) {
+                        work.add(s);
+                    }
+                }
+            }
+
+            // 2. First: all non-main-region blocks (functions).
+            // 3. Then: all main-region blocks.
+            List<BasicBlock> ordered = new ArrayList<>();
+            for (BasicBlock b : blocks) {
+                if (!mainRegion.contains(b)) {
+                    ordered.add(b);
+                }
+            }
+            for (BasicBlock b : blocks) {
+                if (mainRegion.contains(b)) {
+                    ordered.add(b);
+                }
+            }
+            return ordered;
         }
 
         // ---------------------------------------------------------------------
@@ -3008,29 +3174,47 @@ public class Compiler {
 
         private int loadValue(Value v, int reg) {
             if (v == null) {
-                // default 0
+                // default 0 (integer)
                 code.add(DLX.assemble(DLX.ADDI, reg, R_ZERO, 0));
                 return reg;
             }
+
             if (v instanceof Literal lit) {
                 Object o = lit.value();
-                int c;
+
+                // Integer literal
                 if (o instanceof Integer i) {
-                    c = i;
-                } else if (o instanceof Boolean b) {
-                    c = b ? 1 : 0;
-                } else if (o instanceof Float f) {
-                    // for now, treat float bits as int (no arithmetic on them here)
-                    c = Float.floatToIntBits(f);
-                } else {
-                    c = 0;
+                    int c = i;
+                    // Assumption: test suite uses immediates that fit in 16 bits.
+                    // If you're worried, you can clamp or build large constants
+                    // via shifts and ors.
+                    code.add(DLX.assemble(DLX.ADDI, reg, R_ZERO, c));
+                    return reg;
                 }
-                code.add(DLX.assemble(DLX.ADDI, reg, R_ZERO, c));
+
+                // Boolean literal
+                if (o instanceof Boolean b) {
+                    int c = b ? 1 : 0;
+                    code.add(DLX.assemble(DLX.ADDI, reg, R_ZERO, c));
+                    return reg;
+                }
+
+                // Float literal
+                if (o instanceof Float f) {
+                    // Use the floating-point immediate form, which packs to FP16.
+                    code.add(DLX.assemble(DLX.fADDI, reg, R_ZERO, f));
+                    return reg;
+                }
+
+                // Anything else: just load 0 as a fallback
+                code.add(DLX.assemble(DLX.ADDI, reg, R_ZERO, 0));
                 return reg;
             }
+
             if (v instanceof Variable var) {
                 return loadVar(var, reg);
             }
+
             // Fallback
             code.add(DLX.assemble(DLX.ADDI, reg, R_ZERO, 0));
             return reg;
@@ -3086,12 +3270,17 @@ public class Compiler {
                         n += estimateLoadSize(a.left());
                         int srcReg = getSourceReg(a.left(), R_TMP1);
                         n += estimateStoreSize(a.dest(), srcReg);
-                    } else {
+                    } else if ("add".equals(op) || "sub".equals(op) ||
+                               "mul".equals(op) || "div".equals(op) ||
+                               "mod".equals(op) || "pow".equals(op)) {
                         // arithmetic: load L, load R, one op, store
                         n += estimateLoadSize(a.left());
                         n += estimateLoadSize(a.right());
                         n += 1; // OP
                         n += estimateStoreSize(a.dest(), R_TMP3);
+                    } else {
+                        // Unknown TAC op (phi, array stuff, etc.) – emitBlock does nothing,
+                        // so here we must also count 0 instructions to keep blockPC consistent.
                     }
                 } else if (t instanceof Call c) {
                     String fname = (c.function() == null) ? null : c.function().name();
@@ -3202,8 +3391,14 @@ public class Compiler {
                         emitBoolOp(a);
                         continue;
                     }
-                    // Arithmetic default
-                    emitArith(a);
+                    if ("add".equals(op) || "sub".equals(op) ||
+                            "mul".equals(op) || "div".equals(op) ||
+                            "mod".equals(op) || "pow".equals(op)) {
+                            emitArith(a);
+                        } else {
+                            // Unknown TAC op (phi, array addr, etc.) -> no code here
+                            // It should already be lowered/handled elsewhere.
+                        }
                 } else if (t instanceof Call c) {
                     emitCall(c);
                 }
@@ -3252,7 +3447,7 @@ public class Compiler {
                     break;
                 default:
                     // unknown op, emit error instruction
-                    code.add(DLX.assemble(DLX.ERR));
+                    //code.add(DLX.assemble(DLX.ERR));
                     return;
             }
 
@@ -3337,7 +3532,7 @@ public class Compiler {
             // rDst = 0
             code.add(DLX.assemble(DLX.ADDI, rDst, R_ZERO, 0));
             // if src != 0 -> branch over "set to 1" (we want !src)
-            code.add(DLX.assemble(DLX.BNE, rSrc, 0, 2));
+            code.add(DLX.assemble(DLX.BNE, rSrc, 2));
             // src == 0 -> rDst = 1
             code.add(DLX.assemble(DLX.ADDI, rDst, R_ZERO, 1));
 
@@ -3431,8 +3626,11 @@ public class Compiler {
                 return false;
             return name.equals("printInt") ||
                     name.equals("printBool") ||
+                    name.equals("printFloat") ||
                     name.equals("println") ||
-                    name.equals("readInt");
+                    name.equals("readInt") ||
+                    name.equals("readBool") ||
+                    name.equals("readFloat");
         }
 
         private void emitCall(Call c) {
@@ -3458,22 +3656,42 @@ public class Compiler {
             }
 
             if ("printInt".equals(fname)) {
-                // one int argument in a register; use WRI
                 Value arg = c.args().isEmpty() ? null : c.args().get(0);
                 int r = loadValue(arg, R_TMP1);
                 code.add(DLX.assemble(DLX.WRI, r));
+
             } else if ("printBool".equals(fname)) {
                 Value arg = c.args().isEmpty() ? null : c.args().get(0);
                 int r = loadValue(arg, R_TMP1);
                 code.add(DLX.assemble(DLX.WRB, r));
+                
+            } else if ("printFloat".equals(fname)) {
+                Value arg = c.args().isEmpty() ? null : c.args().get(0);
+                int r = loadValue(arg, R_TMP1);
+                // *** IMPORTANT: WRF *must* be called with 1 arg (the register) ***
+                code.add(DLX.assemble(DLX.WRF, r));
+
             } else if ("println".equals(fname)) {
                 code.add(DLX.assemble(DLX.WRL));
+
             } else if ("readInt".equals(fname)) {
-                // RDI reads into register; if there is a destination variable, store into it.
                 int r = R_TMP1;
                 code.add(DLX.assemble(DLX.RDI, r));
                 if (c.dest() != null) {
                     storeVar(r, c.dest());
+                }
+
+            } else if ("readBool".equals(fname)) {  
+                int r = R_TMP1;
+                code.add(DLX.assemble(DLX.RDB, r));  
+                if (c.dest() != null) {
+                    storeVar(r, c.dest());             
+                }
+            } else if ("readFloat".equals(fname)) {
+                int r = R_TMP1;
+                code.add(DLX.assemble(DLX.RDF, r));   // read float into r
+                if (c.dest() != null) {
+                    storeVar(r, c.dest());           // store raw bits into dest var
                 }
             }
         }

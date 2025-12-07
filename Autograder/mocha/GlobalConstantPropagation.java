@@ -114,20 +114,20 @@ public class GlobalConstantPropagation {
                 }
             } else {
                 // Merge predecessors
-                boolean first = true;
+            	boolean first = true;
                 for (BasicBlock pred : bb.preds()) {
                     Map<String, LatticeValue> predOut = outStates.get(pred);
+                    if (predOut == null) {
+                        // Predecessor not in outStates — treat as "no information" (TOP)
+                        predOut = java.util.Collections.emptyMap();
+                    }
+
                     if (first) {
+                        // First predecessor: copy its state
                         inState.putAll(predOut);
                         first = false;
                     } else {
-                        // Merge logic:
-                        // For each variable in either map, meet them.
-                        // If a variable is missing in one, it's treated as TOP (so result is the
-                        // other).
-                        // Wait, if missing means TOP, then:
-                        // result[v] = predOut[v] meet inState[v]
-
+                        // Meet with existing IN state
                         Set<String> allVars = new HashSet<>(inState.keySet());
                         allVars.addAll(predOut.keySet());
 
@@ -189,9 +189,13 @@ public class GlobalConstantPropagation {
                     current.put(g, LatticeValue.BOTTOM);
                 }
             } else {
-                boolean first = true;
+            	boolean first = true;
                 for (BasicBlock pred : bb.preds()) {
                     Map<String, LatticeValue> predOut = outStates.get(pred);
+                    if (predOut == null) {
+                        predOut = java.util.Collections.emptyMap();
+                    }
+
                     if (first) {
                         current.putAll(predOut);
                         first = false;
