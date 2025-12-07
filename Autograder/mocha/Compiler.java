@@ -158,15 +158,26 @@ public class Compiler {
 
     /** Entry point for PA6 code generation – IR → DLX object code. */
     public int[] genCode() {
-        // Rebuild a fresh, unoptimized IR so that codegen is predictable.
-        // (If you want optimizations to affect code, you can instead reuse currentIR.)
-        if (astRoot == null || astRoot.getRoot() == null) {
-            return new int[0];
+        // Use currentIR if available (optimized), otherwise generate fresh
+        if (currentIR == null) {
+            if (astRoot == null || astRoot.getRoot() == null) {
+                return new int[0];
+            }
+            genIR(astRoot);
         }
-        IR ir = genIR(astRoot); // rebuild IR from AST
-        List<BasicBlock> blocks = ir.blocks();
+        List<BasicBlock> blocks = currentIR.blocks();
 
-        CodeGenerator cg = new CodeGenerator();
+        // Build funcs map for CodeGenerator
+        Map<String, AST.FunctionDeclaration> funcs = new HashMap<>();
+        if (astRoot != null && astRoot.getRoot() != null) {
+            for (AST.Declaration d : astRoot.getRoot().functions()) {
+                if (d instanceof AST.FunctionDeclaration fd) {
+                    funcs.put(fd.getIdentifier().getName(), fd);
+                }
+            }
+        }
+
+        CodeGenerator cg = new CodeGenerator(funcs);
         this.instructions = cg.generate(blocks);
         return instructions.stream().mapToInt(Integer::intValue).toArray();
     }
@@ -2442,19 +2453,22 @@ public class Compiler {
         RegAllocResult res = colorGraph(ig, numDataRegisters);
 
         // --- DEBUG: print coloring result and spills ---
-        System.err.println("==== RA: Coloring Result (K = " + numDataRegisters + ") ====");
-        for (Map.Entry<String, Integer> e : res.colors.entrySet()) {
-            System.err.println("  var " + e.getKey() + " -> R" + e.getValue());
-        }
-        System.err.println("==== RA: Spilled Variables ====");
-        if (res.spilled.isEmpty()) {
-            System.err.println("  (none)");
-        } else {
-            for (String v : res.spilled) {
-                System.err.println("  " + v + " -> spilled (M_" + v + ")");
-            }
-        }
-        System.err.println();
+        /*
+         * System.err.println("==== RA: Coloring Result (K = " + numDataRegisters +
+         * ") ====");
+         * for (Map.Entry<String, Integer> e : res.colors.entrySet()) {
+         * System.err.println("  var " + e.getKey() + " -> R" + e.getValue());
+         * }
+         * System.err.println("==== RA: Spilled Variables ====");
+         * if (res.spilled.isEmpty()) {
+         * System.err.println("  (none)");
+         * } else {
+         * for (String v : res.spilled) {
+         * System.err.println("  " + v + " -> spilled (M_" + v + ")");
+         * }
+         * }
+         * System.err.println();
+         */
 
         rewriteWithRegisters(blocks, res.colors, res.spilled);
         removeSillyMoves(blocks);
@@ -2739,7 +2753,11 @@ public class Compiler {
             }
 
             int chosen = -1;
-            for (int c = 0; c < K; c++) {
+            // Start from 1 to avoid R0 (always zero)
+            // Skip reserved registers: 28 (FP), 29 (SP), 30 (GP), 31 (RET)
+            for (int c = 1; c < K; c++) {
+                if (c >= 28 && c <= 31)
+                    continue;
                 if (!used.contains(c)) {
                     chosen = c;
                     break;
@@ -2859,6 +2877,13 @@ public class Compiler {
 
         // Result program as list of DLX words
         private final List<Integer> code = new ArrayList<>();
+        private final Map<String, AST.FunctionDeclaration> funcs;
+        private final Map<String, Integer> funcEntryPC = new HashMap<>();
+        private String currentFunction = null;
+
+        CodeGenerator(Map<String, AST.FunctionDeclaration> funcs) {
+            this.funcs = funcs;
+        }
 
         List<Integer> generate(List<BasicBlock> blocks) {
             if (blocks == null || blocks.isEmpty()) {
@@ -2872,6 +2897,14 @@ public class Compiler {
             int pc = 0;
             for (BasicBlock b : blocks) {
                 blockPC.put(b, pc);
+                // Check for function entry label
+                for (ir.tac.TAC t : b.instructions()) {
+                    if (t instanceof Assign a && "label".equals(a.opcode())) {
+                        if (a.dest() != null) {
+                            funcEntryPC.put(a.dest().toString(), pc);
+                        }
+                    }
+                }
                 pc += estimateBlockSize(b);
             }
 
@@ -2912,6 +2945,8 @@ public class Compiler {
         private void addVar(Variable v) {
             if (v == null)
                 return;
+            if (getRegister(v) != -1)
+                return;
             String name = v.toString();
             if (!varOffset.containsKey(name)) {
                 varOffset.put(name, nextOffset);
@@ -2938,14 +2973,37 @@ public class Compiler {
         }
 
         private int loadVar(Variable v, int reg) {
+            int r = getRegister(v);
+            if (r != -1) {
+                return r;
+            }
             int off = offsetOf(v);
             code.add(DLX.assemble(DLX.LDW, reg, R_GP, off));
             return reg;
         }
 
         private void storeVar(int reg, Variable v) {
+            int r = getRegister(v);
+            if (r != -1) {
+                if (r != reg) {
+                    code.add(DLX.assemble(DLX.ADD, r, R_ZERO, reg));
+                }
+                return;
+            }
             int off = offsetOf(v);
             code.add(DLX.assemble(DLX.STW, reg, R_GP, off));
+        }
+
+        private int getRegister(Variable v) {
+            String name = v.toString();
+            if (name.startsWith("R")) {
+                try {
+                    return Integer.parseInt(name.substring(1));
+                } catch (NumberFormatException e) {
+                    return -1;
+                }
+            }
+            return -1;
         }
 
         private int loadValue(Value v, int reg) {
@@ -2994,50 +3052,121 @@ public class Compiler {
                     if ("label".equals(op)) {
                         // no code emitted
                     } else if ("test".equals(op)) {
-                        // we emit 1 load + 2 branches
-                        n += 3;
+                        // loadValue + 2 branches
+                        n += estimateLoadSize(a.left()) + 2;
                     } else if ("ret".equals(op)) {
-                        // one move (if non-void) + RET 0
+                        // loadValue (if non-void) + RET
                         if (a.left() != null)
-                            n += 1;
+                            n += estimateLoadSize(a.left());
                         n += 1;
                     } else if (isRelOp(op)) {
-                        // approx: load L, load R, SUB, init dest, branch, set dest
-                        n += 6;
+                        // load L, load R, SUB, init dest, branch, set dest, store dest
+                        n += estimateLoadSize(a.left());
+                        n += estimateLoadSize(a.right());
+                        n += 1; // SUB
+                        n += 1; // ADDI 0
+                        n += 1; // Branch
+                        n += 1; // ADDI 1
+                        n += estimateStoreSize(a.dest(), R_TMP4);
                     } else if ("not".equals(op)) {
-                        // load, init, branch, set
-                        n += 4;
+                        // load, init, branch, set, store
+                        n += estimateLoadSize(a.left());
+                        n += 1; // ADDI 0
+                        n += 1; // BNE
+                        n += 1; // ADDI 1
+                        n += estimateStoreSize(a.dest(), R_TMP2);
                     } else if ("and".equals(op) || "or".equals(op)) {
-                        // load L,R, logical op
-                        n += 3;
+                        // load L,R, logical op, store
+                        n += estimateLoadSize(a.left());
+                        n += estimateLoadSize(a.right());
+                        n += 1; // OP
+                        n += estimateStoreSize(a.dest(), R_TMP3);
                     } else if ("mov".equals(op)) {
                         // load src, store dst
-                        n += 2;
+                        n += estimateLoadSize(a.left());
+                        int srcReg = getSourceReg(a.left(), R_TMP1);
+                        n += estimateStoreSize(a.dest(), srcReg);
                     } else {
                         // arithmetic: load L, load R, one op, store
-                        n += 4;
+                        n += estimateLoadSize(a.left());
+                        n += estimateLoadSize(a.right());
+                        n += 1; // OP
+                        n += estimateStoreSize(a.dest(), R_TMP3);
                     }
                 } else if (t instanceof Call c) {
                     String fname = (c.function() == null) ? null : c.function().name();
                     if (isBuiltin(fname)) {
                         // loads for args + one IO instr
-                        if (c.args() != null)
-                            n += c.args().size();
-                        n += 1;
+                        if (c.args() != null) {
+                            for (Value arg : c.args()) {
+                                n += estimateLoadSize(arg);
+                            }
+                        }
+                        n += 1; // IO instr
                         if (c.dest() != null) {
                             // store return value if any (e.g., readInt)
-                            n += 1;
+                            n += estimateStoreSize(c.dest(), R_TMP1);
                         }
                     } else {
-                        // user-defined functions not supported in this simple generator
-                        // treat as error: we emit ERR and stop the world
-                        n += 1;
+                        // User-defined function call
+                        if (funcEntryPC.containsKey(fname)) {
+                            // 1. Pass arguments
+                            if (funcs != null && funcs.containsKey(fname)) {
+                                AST.FunctionDeclaration fd = funcs.get(fname);
+                                List<AST.FormalParameter> params = fd.getParameters();
+                                List<Value> args = c.args();
+                                if (params != null && args != null && params.size() == args.size()) {
+                                    for (int k = 0; k < params.size(); k++) {
+                                        n += estimateLoadSize(args.get(k));
+                                        int argReg = getSourceReg(args.get(k), R_TMP1);
+                                        n += estimateStoreSize(new Variable(
+                                                new Symbol(params.get(k).getIdentifier().getName(), null)), argReg);
+                                    }
+                                }
+                            }
+                            // 2. JSR
+                            n += 1;
+                            // 3. Return value
+                            if (c.dest() != null) {
+                                n += estimateStoreSize(c.dest(), 27);
+                            }
+                        } else {
+                            // Unknown function -> ERR
+                            n += 1;
+                        }
                     }
                 }
             }
-
-            // Control-flow edges: we use 'test' pseudo only, nothing extra here.
             return n;
+        }
+
+        private int estimateLoadSize(Value v) {
+            if (v instanceof Variable var) {
+                if (getRegister(var) != -1)
+                    return 0;
+                return 1; // LDW
+            }
+            // Literal
+            return 1; // ADDI
+        }
+
+        private int estimateStoreSize(Variable v, int srcReg) {
+            int r = getRegister(v);
+            if (r != -1) {
+                if (r != srcReg)
+                    return 1; // ADD move
+                return 0; // No move needed
+            }
+            return 1; // STW
+        }
+
+        private int getSourceReg(Value v, int defaultReg) {
+            if (v instanceof Variable var) {
+                int r = getRegister(var);
+                if (r != -1)
+                    return r;
+            }
+            return defaultReg;
         }
 
         // ---------------------------------------------------------------------
@@ -3055,6 +3184,10 @@ public class Compiler {
                 if (t instanceof Assign a) {
                     String op = a.opcode();
                     if ("label".equals(op)) {
+                        // Track current function
+                        if (a.dest() != null) {
+                            currentFunction = a.dest().toString();
+                        }
                         // noop at machine level in this simple generator
                         continue;
                     }
@@ -3199,7 +3332,7 @@ public class Compiler {
             // Branch over "set rDst = 1" if condition is FALSE.
             // We want to skip exactly 1 instruction (ADDI) -> offset = 2 (because
             // PC moves by 'c' from current PC, not from PC+1).
-            code.add(DLX.assemble(branchOpFalse, rDiff, 0, 2));
+            code.add(DLX.assemble(branchOpFalse, rDiff, 2));
 
             // If condition is true: rDst = 1
             code.add(DLX.assemble(DLX.ADDI, rDst, R_ZERO, 1));
@@ -3243,14 +3376,16 @@ public class Compiler {
         // ---------------------------------------------------------------------
 
         private void emitReturn(Assign a) {
-            // In this simple generator we treat any return as "end program".
-            // If there is a value, we ignore it (you can extend this to put it in a
-            // register).
             if (a.left() != null) {
-                // Evaluate and drop into a temp just for side effects (if any).
-                loadValue(a.left(), R_TMP1);
+                // If there is a return value, put it in R27 (convention?)
+                // Or R1? Let's use R27 as a temporary return register.
+                loadValue(a.left(), 27);
             }
-            code.add(DLX.assemble(DLX.RET, 0)); // RET 0 -> terminate program
+            if ("main".equals(currentFunction)) {
+                code.add(DLX.assemble(DLX.RET, 0)); // Terminate
+            } else {
+                code.add(DLX.assemble(DLX.RET, 31)); // Return to caller
+            }
         }
 
         /**
@@ -3284,10 +3419,10 @@ public class Compiler {
             int offTrue = pcTrue - (pcHere + 1); // from BSR position (next instr)
 
             // if cond == 0 -> jump to false
-            code.add(DLX.assemble(DLX.BEQ, rCond, 0, offFalse));
+            code.add(DLX.assemble(DLX.BEQ, rCond, offFalse));
 
-            // otherwise jump to true
-            code.add(DLX.assemble(DLX.BSR, 0, offTrue));
+            // otherwise jump to true (unconditional branch using BEQ R0)
+            code.add(DLX.assemble(DLX.BEQ, R_ZERO, offTrue));
         }
 
         // ---------------------------------------------------------------------
@@ -3307,9 +3442,42 @@ public class Compiler {
             String fname = (c.function() == null) ? null : c.function().name();
 
             if (!isBuiltin(fname)) {
-                // For now, we don't support user-defined functions in codegen.
-                // Emit an ERR instruction so you get a clear runtime failure
-                // if such a call is reached.
+                // User-defined function call
+                if (funcEntryPC.containsKey(fname)) {
+                    // 1. Pass arguments
+                    // We need to map args to params.
+                    // Since we are using global register allocation, params are just variables.
+                    // We need to move args to param locations.
+                    if (funcs != null && funcs.containsKey(fname)) {
+                        AST.FunctionDeclaration fd = funcs.get(fname);
+                        List<AST.FormalParameter> params = fd.getParameters();
+                        List<Value> args = c.args();
+                        if (params != null && args != null && params.size() == args.size()) {
+                            for (int i = 0; i < params.size(); i++) {
+                                String paramName = params.get(i).getIdentifier().getName();
+                                Value argVal = args.get(i);
+                                // Move argVal to paramName
+                                // Load argVal into temp
+                                int rArg = loadValue(argVal, R_TMP1);
+                                // Store into param variable
+                                storeVar(rArg, new Variable(new Symbol(paramName, null)));
+                            }
+                        }
+                    }
+
+                    // 2. JSR to function
+                    int targetPC = funcEntryPC.get(fname);
+                    code.add(DLX.assemble(DLX.JSR, targetPC * 4));
+
+                    // 3. Handle return value
+                    if (c.dest() != null) {
+                        // Result is in R27
+                        storeVar(27, c.dest());
+                    }
+                    return;
+                }
+
+                // Unknown function
                 code.add(DLX.assemble(DLX.ERR));
                 return;
             }

@@ -10,18 +10,19 @@ import java.util.StringTokenizer;
 public class DLX {
 
     public static final boolean DEBUG = false;
-    private DLX () {
+
+    private DLX() {
         throw new IllegalStateException("Utility class");
     }
 
-// Processor Emulation ========================================================
+    // Processor Emulation ========================================================
     private static int[] R = new int[32];
     private static int PC, op, a, b, c, format;
 
     private static final int MEM_SIZE = 10000;
-    private static int[] M = new int[MEM_SIZE/4];
+    private static int[] M = new int[MEM_SIZE / 4];
 
-    public static void load (int[] program) {
+    public static void load(int[] program) {
         M = Arrays.copyOf(program, M.length);
         M[program.length] = -1;
     }
@@ -33,9 +34,9 @@ public class DLX {
     private static int currentLine = -1;
     private static StringTokenizer st = null;
 
-    public static void execute (InputStream in) throws IOException {
-        int origC = 0;  // used for F2 instruction RET
-        float fC = 0f;  // used for F1/F2 instructions fOP
+    public static void execute(InputStream in) throws IOException {
+        int origC = 0; // used for F2 instruction RET
+        float fC = 0f; // used for F1/F2 instructions fOP
         for (int i = 0; i < 32; i++) {
             R[i] = 0;
         }
@@ -56,7 +57,7 @@ public class DLX {
                         System.err.println("R[" + i + "] :: " + R[i]);
                     }
                     for (int i = 0; i < 40; i += 4) {
-                        System.err.println("--M[" + (R[30]-i)/4 + "] :: " + M[(R[30]-i)/4]);
+                        System.err.println("--M[" + (R[30] - i) / 4 + "] :: " + M[(R[30] - i) / 4]);
                     }
                 }
 
@@ -117,7 +118,7 @@ public class DLX {
                     case POWI:
                         if (R[b] < 0 || c < 0) {
                             System.err.println("DLX.execute: Illegal value (" + R[b] + ")^("
-                                                + c + ") in POW!");
+                                    + c + ") in POW!");
                             bug(1);
                         }
                         R[a] = (int) Math.round(Math.pow(R[b], c));
@@ -127,8 +128,7 @@ public class DLX {
                         R[a] = R[b] - c;
                         if (R[a] < 0) {
                             R[a] = -1;
-                        }
-                        else if (R[a] > 1) {
+                        } else if (R[a] > 1) {
                             R[a] = 1;
                         }
                         break;
@@ -139,8 +139,7 @@ public class DLX {
                         R[a] = 0;
                         if (result <= -EPS) {
                             R[a] = -1;
-                        }
-                        else if (result >= EPS) {
+                        } else if (result >= EPS) {
                             R[a] = 1;
                         }
                         break;
@@ -169,8 +168,7 @@ public class DLX {
 
                         if (c < 0) {
                             R[a] = R[b] >>> -c;
-                        }
-                        else {
+                        } else {
                             R[a] = R[b] << c;
                         }
                         break;
@@ -183,21 +181,19 @@ public class DLX {
 
                         if (c < 0) {
                             R[a] = R[b] >> -c;
-                        }
-                        else {
+                        } else {
                             R[a] = R[b] << c;
                         }
                         break;
                     case CHK:
                     case CHKI:
                         if (R[a] < 0) {
-                            System.err.println("DLX.execute: " + (4*PC) + " :: R[" + a + "] == "
-                                                + R[a] + " < 0");
+                            System.err.println("DLX.execute: " + (4 * PC) + " :: R[" + a + "] == "
+                                    + R[a] + " < 0");
                             bug(39);
-                        }
-                        else if (R[a] >= c) {
-                            System.err.println("DLX.execute: " + (4*PC) + " :: R[" + a + "] == "
-                                                + R[a] + " >= " + c);
+                        } else if (R[a] >= c) {
+                            System.err.println("DLX.execute: " + (4 * PC) + " :: R[" + a + "] == "
+                                    + R[a] + " >= " + c);
                             bug(39);
                         }
                         break;
@@ -219,16 +215,16 @@ public class DLX {
                         break;
                     case ARRCPY:
                         for (int i = 0; i < c; i++) {
-                            M[(R[a] - 4*i) / 4] = M[(R[b] - 4*i) / 4];
+                            M[(R[a] - 4 * i) / 4] = M[(R[b] - 4 * i) / 4];
                         }
                         break;
                     case BEQ:
                         if (R[a] == 0) {
                             nextPC = PC + c;
                         }
-                        if (nextPC < 0 || nextPC > MEM_SIZE/4) {
-                            System.err.println("DLX.execute: " + (4*nextPC) + " is no address "
-                                                + "in memory [0, " + MEM_SIZE + "].");
+                        if (nextPC < 0 || nextPC > MEM_SIZE / 4) {
+                            System.err.println("DLX.execute: " + (4 * nextPC) + " is no address "
+                                    + "in memory [0, " + MEM_SIZE + "].");
                             bug(47);
                         }
                         break;
@@ -236,9 +232,9 @@ public class DLX {
                         if (R[a] != 0) {
                             nextPC = PC + c;
                         }
-                        if (nextPC < 0 || nextPC > MEM_SIZE/4) {
-                            System.err.println("DLX.execute: " + (4*nextPC) + " is no address "
-                                                + "in memory [0, " + MEM_SIZE + "].");
+                        if (nextPC < 0 || nextPC > MEM_SIZE / 4) {
+                            System.err.println("DLX.execute: " + (4 * nextPC) + " is no address "
+                                    + "in memory [0, " + MEM_SIZE + "].");
                             bug(48);
                         }
                         break;
@@ -246,9 +242,9 @@ public class DLX {
                         if (R[a] < 0) {
                             nextPC = PC + c;
                         }
-                        if (nextPC < 0 || nextPC > MEM_SIZE/4) {
-                            System.err.println("DLX.execute: " + (4*nextPC) + " is no address "
-                                                + "in memory [0, " + MEM_SIZE + "].");
+                        if (nextPC < 0 || nextPC > MEM_SIZE / 4) {
+                            System.err.println("DLX.execute: " + (4 * nextPC) + " is no address "
+                                    + "in memory [0, " + MEM_SIZE + "].");
                             bug(49);
                         }
                         break;
@@ -256,9 +252,9 @@ public class DLX {
                         if (R[a] >= 0) {
                             nextPC = PC + c;
                         }
-                        if (nextPC < 0 || nextPC > MEM_SIZE/4) {
-                            System.err.println("DLX.execute: " + (4*nextPC) + " is no address "
-                                                + "in memory [0, " + MEM_SIZE + "].");
+                        if (nextPC < 0 || nextPC > MEM_SIZE / 4) {
+                            System.err.println("DLX.execute: " + (4 * nextPC) + " is no address "
+                                    + "in memory [0, " + MEM_SIZE + "].");
                             bug(50);
                         }
                         break;
@@ -266,9 +262,9 @@ public class DLX {
                         if (R[a] <= 0) {
                             nextPC = PC + c;
                         }
-                        if (nextPC < 0 || nextPC > MEM_SIZE/4) {
-                            System.err.println("DLX.execute: " + (4*nextPC) + " is no address "
-                                                + "in memory [0, " + MEM_SIZE + "].");
+                        if (nextPC < 0 || nextPC > MEM_SIZE / 4) {
+                            System.err.println("DLX.execute: " + (4 * nextPC) + " is no address "
+                                    + "in memory [0, " + MEM_SIZE + "].");
                             bug(51);
                         }
                         break;
@@ -276,27 +272,27 @@ public class DLX {
                         if (R[a] > 0) {
                             nextPC = PC + c;
                         }
-                        if (nextPC < 0 || nextPC > MEM_SIZE/4) {
-                            System.err.println("DLX.execute: " + (4*nextPC) + " is no address "
-                                                + "in memory [0, " + MEM_SIZE + "].");
+                        if (nextPC < 0 || nextPC > MEM_SIZE / 4) {
+                            System.err.println("DLX.execute: " + (4 * nextPC) + " is no address "
+                                    + "in memory [0, " + MEM_SIZE + "].");
                             bug(52);
                         }
                         break;
                     case BSR:
                         R[31] = 4 * (PC + 1);
                         nextPC = PC + c;
-                        if (nextPC < 0 || nextPC > MEM_SIZE/4) {
-                            System.err.println("DLX.execute: " + (4*nextPC) + " is no address "
-                                                + "in memory [0, " + MEM_SIZE + "].");
+                        if (nextPC < 0 || nextPC > MEM_SIZE / 4) {
+                            System.err.println("DLX.execute: " + (4 * nextPC) + " is no address "
+                                    + "in memory [0, " + MEM_SIZE + "].");
                             bug(53);
                         }
                         break;
                     case JSR:
                         R[31] = 4 * (PC + 1);
                         nextPC = c / 4;
-                        if (nextPC < 0 || nextPC > MEM_SIZE/4) {
-                            System.err.println("DLX.execute: " + (4*nextPC) + " is no address "
-                                                + "in memory [0, " + MEM_SIZE + "].");
+                        if (nextPC < 0 || nextPC > MEM_SIZE / 4) {
+                            System.err.println("DLX.execute: " + (4 * nextPC) + " is no address "
+                                    + "in memory [0, " + MEM_SIZE + "].");
                             bug(54);
                         }
                         break;
@@ -306,9 +302,9 @@ public class DLX {
                             break;
                         }
                         nextPC = c / 4;
-                        if (nextPC < 0 || nextPC > MEM_SIZE/4) {
-                            System.err.println("DLX.execute: " + (4*nextPC) + " is no address "
-                                                + "in memory [0, " + MEM_SIZE + "].");
+                        if (nextPC < 0 || nextPC > MEM_SIZE / 4) {
+                            System.err.println("DLX.execute: " + (4 * nextPC) + " is no address "
+                                    + "in memory [0, " + MEM_SIZE + "].");
                             bug(55);
                         }
                         break;
@@ -349,67 +345,68 @@ public class DLX {
                 }
                 PC = nextPC;
             }
-        }
-        catch (NumberFormatException e) {
+        } catch (NumberFormatException e) {
             throw new NumberFormatException("Failed at line " + currentLine + " of input: " + e.getMessage());
-        }
-        catch (ArrayIndexOutOfBoundsException e) {
-            System.err.println("Failed at " + (4*PC));
+        } catch (ArrayIndexOutOfBoundsException e) {
+            System.err.println("Failed at " + (4 * PC));
             System.err.println("Instruction :: " + instrString(M[PC]));
             bug(63);
         }
     }
 
-
-
     // form input strings from line of input
-    private static String nextInput (BufferedReader reader) throws IOException {
-		while (st == null || !st.hasMoreElements()) {
-			try {
-				st = new StringTokenizer(reader.readLine());
+    private static String nextInput(BufferedReader reader) throws IOException {
+        while (st == null || !st.hasMoreElements()) {
+            try {
+                st = new StringTokenizer(reader.readLine());
                 currentLine++;
-			}
-			catch (IOException e) {
-				System.out.println("error");
-				System.err.println("Interepter: Couldn't read data file");
-				throw e;
-			}
-		}
-		return st.nextToken();
+            } catch (IOException e) {
+                System.out.println("error");
+                System.err.println("Interepter: Couldn't read data file");
+                throw e;
+            }
+        }
+        return st.nextToken();
     }
 
     // put val in R[idx]
-    private static void fR (int idx, float val) {
+    private static void fR(int idx, float val) {
         R[idx] = Float.floatToIntBits(val);
     }
 
     // get float value from R[idx]
-    private static float fR (int idx) {
+    private static float fR(int idx) {
         return Float.intBitsToFloat(R[idx]);
     }
 
-// Half-Precision Floating-Point (FP16) Support ===============================
+    // Half-Precision Floating-Point (FP16) Support ===============================
 
     /*
      * Functionality inspired by and built off the following reference sources:
-     * 		- https://en.wikipedia.org/wiki/Half-precision_floating-point_format
-     * 		- http://www.fox-toolkit.org/ftp/fasthalffloatconversion.pdf
-     * 		- https://stackoverflow.com/questions/6162651/half-precision-floating-point-in-java
-     * 		- https://stackoverflow.com/questions/1659440/32-bit-to-16-bit-floating-point-conversion
-     * 		- https://stackoverflow.com/questions/5678432/decompressing-half-precision-floats-in-javascript
+     * - https://en.wikipedia.org/wiki/Half-precision_floating-point_format
+     * - http://www.fox-toolkit.org/ftp/fasthalffloatconversion.pdf
+     * -
+     * https://stackoverflow.com/questions/6162651/half-precision-floating-point-in-
+     * java
+     * -
+     * https://stackoverflow.com/questions/1659440/32-bit-to-16-bit-floating-point-
+     * conversion
+     * - https://stackoverflow.com/questions/5678432/decompressing-half-precision-
+     * floats-in-javascript
      *
      * Tools used during development:
-     * 		- http://evanw.github.io/float-toy/
-     * 		- https://www.rapidtables.com/convert/number/hex-to-binary.html
+     * - http://evanw.github.io/float-toy/
+     * - https://www.rapidtables.com/convert/number/hex-to-binary.html
      *
      * All magic numbers not declared static final arise from the following:
-     * 		FP16 spec - 1-bit sign, 5-bit exp w/bias  15, 10-bit mant
-     * 		FP32 spec - 1-bit sign, 8-bit exp w/bias 127, 23-bit mant
+     * FP16 spec - 1-bit sign, 5-bit exp w/bias 15, 10-bit mant
+     * FP32 spec - 1-bit sign, 8-bit exp w/bias 127, 23-bit mant
      *
-     * 		FP16 representation - s	eee ee		mm mmmm mmmm
-     * 		FP32 representation - s	eee eeee e	mmm mmmm mmmm mmmm mmmm mmmm
+     * FP16 representation - s eee ee mm mmmm mmmm
+     * FP32 representation - s eee eeee e mmm mmmm mmmm mmmm mmmm mmmm
      *
-     * 		In general, FP16 exp is 5 MSBs of FP32 exp and FP16 mant is 10 MSBs of FP32 mant
+     * In general, FP16 exp is 5 MSBs of FP32 exp and FP16 mant is 10 MSBs of FP32
+     * mant
      */
 
     // FP32 boundaries for converion to FP16
@@ -426,95 +423,93 @@ public class DLX {
     private static final int FP16_BIAS = 15;
 
     // convert half-precision floating-point to half-precision floating-point
-    private static float toFP32FromFP16 (int hbits) {
-        int sign = (hbits & 0x8000) << 16;  // bitmask to collect sign for FP32
+    private static float toFP32FromFP16(int hbits) {
+        int sign = (hbits & 0x8000) << 16; // bitmask to collect sign for FP32
         int exp = (hbits & 0x7c00); // bitmask to collect FP16 exp w/o sign or mant
-        int mant = hbits & 0x03ff;  // bitmask to collect FP16 mant w/o sign or exp
+        int mant = hbits & 0x03ff; // bitmask to collect FP16 mant w/o sign or exp
 
-        if (exp == FP16_INF) {  // FP16_INF to FP32_INF
-            exp = FP32_INF >>> 13;  // bitshift because later it's shifted back
-        }
-        else if (exp != 0) {  // normal FP16
+        if (exp == FP16_INF) { // FP16_INF to FP32_INF
+            exp = FP32_INF >>> 13; // bitshift because later it's shifted back
+        } else if (exp != 0) { // normal FP16
             exp = ((exp >> 10) - FP16_BIAS + FP32_BIAS) << 10;
-        }
-        else if (mant != 0) {  // subnormal FP16
-            exp = FP32_MIN >>> 13;  // normal FP32 exp
-            int sub = 0x01 << 10;   // subnormal FP16 bit
+        } else if (mant != 0) { // subnormal FP16
+            exp = FP32_MIN >>> 13; // normal FP32 exp
+            int sub = 0x01 << 10; // subnormal FP16 bit
             do {
-                mant <<= 1;     // multiple mant by 2
-                exp -= sub;     // subtract 1 from exp
-            } while ((mant & sub) == 0);    // until no leading zero
-            mant &= 0x03FF;     // bitmask to ignore subnormal bit
+                mant <<= 1; // multiple mant by 2
+                exp -= sub; // subtract 1 from exp
+            } while ((mant & sub) == 0); // until no leading zero
+            mant &= 0x03FF; // bitmask to ignore subnormal bit
         }
 
         // building FP32
-        int val = exp | mant;   // combine exp and mant
-        val <<= 13;             // bitshift to align bits with FP32 spec
+        int val = exp | mant; // combine exp and mant
+        val <<= 13; // bitshift to align bits with FP32 spec
         return Float.intBitsToFloat(sign | val);
     }
 
     // convert single-precision floating-point to half-precision floating-point
-    private static int fromFP32ToFP16 (float fval) {
-        int bits = Float.floatToIntBits(fval);  // convert FP32 to bitstring
-        int sign = (bits >>> 16) & 0x8000;  // bitmask to collect sign for FP16
-        int val = bits & ~(sign << 16);     // bitmask to collect FP32 exp and mant w/o sign
-        int mant = (val >>> 13) & 0x03FF;   // bitmask to collect FP16 mant w/o exp or sign
+    private static int fromFP32ToFP16(float fval) {
+        int bits = Float.floatToIntBits(fval); // convert FP32 to bitstring
+        int sign = (bits >>> 16) & 0x8000; // bitmask to collect sign for FP16
+        int val = bits & ~(sign << 16); // bitmask to collect FP32 exp and mant w/o sign
+        int mant = (val >>> 13) & 0x03FF; // bitmask to collect FP16 mant w/o exp or sign
 
-        if (val >= FP32_MAX) {  // value too large to store in FP16, convert to +/- INF
-            if (val < FP32_INF) {  // value was not previously +/- INF
+        if (val >= FP32_MAX) { // value too large to store in FP16, convert to +/- INF
+            if (val < FP32_INF) { // value was not previously +/- INF
                 return sign | FP16_INF;
             }
             // value was previously +/- INF (or NaN), incl mant bits
             return sign | FP16_INF | mant;
         }
 
-        val += 0x1000;  // round up for conversion from FP32 to FP16
-        if (val >= FP32_MAX) {  // value too large as result of rounding, return FP16 max
+        val += 0x1000; // round up for conversion from FP32 to FP16
+        if (val >= FP32_MAX) { // value too large as result of rounding, return FP16 max
             return sign | (FP16_INF - 0x01);
         }
 
-        int exp = (val >>> 23) & 0xFF;  // bitmask to collect FP16 exp w/o sign
-        mant = (val >>> 13) & 0x03FF;   // bitmask to collect FP16 mant w/o exp or sign
-        if (val >= FP32_MIN) {  // normalized FP16
+        int exp = (val >>> 23) & 0xFF; // bitmask to collect FP16 exp w/o sign
+        mant = (val >>> 13) & 0x03FF; // bitmask to collect FP16 mant w/o exp or sign
+        if (val >= FP32_MIN) { // normalized FP16
             return sign | (exp - FP32_BIAS + FP16_BIAS) << 10 | mant;
         }
-        if (val < FP32_SUB) {  // value too small to represent in FP16, return +/- 0
+        if (val < FP32_SUB) { // value too small to represent in FP16, return +/- 0
             return sign;
         }
 
         // denormalized FP16
         exp = (bits >>> 23) & 0xFF; // bitmask to collect FP32 exp w/o sign; removes rounding
-        mant = bits & 0x007FFFFF;   // bitmask to collect FP32 mant w/o exp or sign
-        int sub = 0x01 << 23;   // subnormal FP32 bit
+        mant = bits & 0x007FFFFF; // bitmask to collect FP32 mant w/o exp or sign
+        int sub = 0x01 << 23; // subnormal FP32 bit
 
-        val = mant | sub;   // add subnormal bit to mant
-        val >>>= (13 + FP32_BIAS - FP16_BIAS - exp);    // bitshift to align bits with FP16 spec
-        val += 0x01;    // round up for conversion from FP32 to FP16
-        val >>>= 1;     // bitshift to account for subnormal conversion
+        val = mant | sub; // add subnormal bit to mant
+        val >>>= (13 + FP32_BIAS - FP16_BIAS - exp); // bitshift to align bits with FP16 spec
+        val += 0x01; // round up for conversion from FP32 to FP16
+        val >>>= 1; // bitshift to account for subnormal conversion
         return sign | val;
     }
 
-// Opcode Handling ============================================================
+    // Opcode Handling ============================================================
     private static final String[] mnemo = {
-        "ADD", "SUB", "MUL", "DIV", "MOD", "POW", "CMP",
-        "fADD", "fSUB", "fMUL", "fDIV", "fMOD", "fCMP",
-        "OR", "AND", "BIC", "XOR", "LSH", "ASH", "CHK",
+            "ADD", "SUB", "MUL", "DIV", "MOD", "POW", "CMP",
+            "fADD", "fSUB", "fMUL", "fDIV", "fMOD", "fCMP",
+            "OR", "AND", "BIC", "XOR", "LSH", "ASH", "CHK",
 
-        "ADDI", "SUBI", "MULI", "DIVI", "MODI", "POWI", "CMPI",
-        "fADDI", "fSUBI", "fMULI", "fDIVI", "fMODI", "fCMPI",
-        "ORI", "ANDI", "BICI", "XORI", "LSHI", "ASHI", "CHKI",
+            "ADDI", "SUBI", "MULI", "DIVI", "MODI", "POWI", "CMPI",
+            "fADDI", "fSUBI", "fMULI", "fDIVI", "fMODI", "fCMPI",
+            "ORI", "ANDI", "BICI", "XORI", "LSHI", "ASHI", "CHKI",
 
-        "LDW", "LDX", "POP",
-        "STW", "STX", "PSH",
+            "LDW", "LDX", "POP",
+            "STW", "STX", "PSH",
 
-        "ARRCPY",
+            "ARRCPY",
 
-        "BEQ", "BNE", "BLT", "BGE", "BLE", "BGT",
-        "BSR", "JSR", "RET",
+            "BEQ", "BNE", "BLT", "BGE", "BLE", "BGT",
+            "BSR", "JSR", "RET",
 
-        "RDI", "RDF", "RDB", "WRI", "WRF", "WRB", "WRL",
+            "RDI", "RDF", "RDB", "WRI", "WRF", "WRB", "WRL",
 
-        "ERR"
+            "ERR"
     };
 
     // arithmetic with F2 format
@@ -533,7 +528,7 @@ public class DLX {
     static final int fMOD = 11;
     static final int fCMP = 12;
 
-    static final int OR  = 13;
+    static final int OR = 13;
     static final int AND = 14;
     static final int BIC = 15;
     static final int XOR = 16;
@@ -558,7 +553,7 @@ public class DLX {
     static final int fMODI = 31;
     static final int fCMPI = 32;
 
-    static final int ORI  = 33;
+    static final int ORI = 33;
     static final int ANDI = 34;
     static final int BICI = 35;
     static final int XORI = 36;
@@ -602,7 +597,7 @@ public class DLX {
     // error
     static final int ERR = 63;
 
-    private static void disassemble (int instrWord) {
+    private static void disassemble(int instrWord) {
         op = instrWord >>> 26;
         a = (instrWord >>> 21) & 0x1F;
         b = (instrWord >>> 16) & 0x1F;
@@ -695,7 +690,7 @@ public class DLX {
         }
     }
 
-    public static String instrString (int instrWord) {
+    public static String instrString(int instrWord) {
         disassemble(instrWord);
         String line = mnemo[op];
 
@@ -786,7 +781,7 @@ public class DLX {
                 System.err.println("R[" + i + "] :: " + R[i]);
             }
             for (int i = 0; i < 40; i += 4) {
-                System.err.println("--M[" + (R[30]-i)/4 + "] :: " + M[(R[30]-i)/4]);
+                System.err.println("--M[" + (R[30] - i) / 4 + "] :: " + M[(R[30] - i) / 4]);
             }
         }
 
@@ -794,18 +789,19 @@ public class DLX {
         System.exit(n);
     }
 
-    private static int F1 (int op, int a, int b, int c) {
+    private static int F1(int op, int a, int b, int c) {
         if (c < 0) {
             c ^= 0xFFFF0000;
         }
         if ((a & ~0x1F | b & ~0x1F | c & ~0xFFFF) != 0) {
-            System.err.println("Illegal Operand(s) for F1 format: " + mnemo[op]);
+            System.err.println("Illegal Operand(s) for F1 format: " + mnemo[op] +
+                    " a=" + a + " b=" + b + " c=" + c);
             bug(1);
         }
         return (op << 26 | a << 21 | b << 16 | c);
     }
 
-    private static int F1 (int op, int a, int b, float c) {
+    private static int F1(int op, int a, int b, float c) {
         int half = fromFP32ToFP16(c);
         if ((a & ~0x1F | b & ~0x1F | half & ~0xFFFF) != 0) {
             System.err.println("Illegal Operand(s) for F1 format: " + mnemo[op]);
@@ -814,7 +810,7 @@ public class DLX {
         return (op << 26 | a << 21 | b << 16 | half);
     }
 
-    private static int F2 (int op, int a, int b, int c) {
+    private static int F2(int op, int a, int b, int c) {
         if ((a & ~0x1F | b & ~0x1F | c & ~0x1F) != 0) {
             System.err.println("Illegal Operand(s) for F2 format: " + mnemo[op]);
             bug(1);
@@ -822,7 +818,7 @@ public class DLX {
         return (op << 26 | a << 21 | b << 16 | c);
     }
 
-    private static int F3 (int op, int c) {
+    private static int F3(int op, int c) {
         if (c < 0 || c > MEM_SIZE) {
             System.err.println("Operand for F3 format is referencing non-existent memory location.");
             bug(1);
@@ -830,7 +826,7 @@ public class DLX {
         return (op << 26 | c);
     }
 
-    public static int assemble (int op) {
+    public static int assemble(int op) {
         if (op != WRL) {
             System.err.println("DLX.assemble: the only instruction without arguments is WRL!");
             bug(1);
@@ -838,7 +834,7 @@ public class DLX {
         return F1(op, 0, 0, 0);
     }
 
-    public static int assemble (int op, int arg1) {
+    public static int assemble(int op, int arg1) {
         switch (op) {
             // F1 format
             case BSR:
@@ -870,7 +866,7 @@ public class DLX {
         return Integer.MIN_VALUE;
     }
 
-    public static int assemble (int op, int arg1, int arg2) {
+    public static int assemble(int op, int arg1, int arg2) {
         switch (op) {
             // F1 format
             case CHKI:
@@ -896,7 +892,7 @@ public class DLX {
         return Integer.MIN_VALUE;
     }
 
-    public static int assemble (int op, int arg1, int arg2, int arg3) {
+    public static int assemble(int op, int arg1, int arg2, int arg3) {
         switch (op) {
             // F1 format
             case ADDI:
@@ -946,14 +942,15 @@ public class DLX {
             // error
             case ERR:
             default:
-                System.err.println("DLX.assemble: wrong opcode for three arg instruction!");
+                System.err.println(
+                        "DLX.assemble: wrong opcode for three arg instruction! Opcode: " + op + " (" + mnemo[op] + ")");
                 bug(1);
                 break;
         }
         return Integer.MIN_VALUE;
     }
 
-    public static int assemble (int op, int arg1, int arg2, float arg3) {
+    public static int assemble(int op, int arg1, int arg2, float arg3) {
         switch (op) {
             // F1 format
             case fADDI:
