@@ -3110,23 +3110,10 @@ public class Compiler {
                     } else {
                         // User-defined function call
                         if (funcEntryPC.containsKey(fname)) {
-                            // 1. Pass arguments
-                            if (funcs != null && funcs.containsKey(fname)) {
-                                AST.FunctionDeclaration fd = funcs.get(fname);
-                                List<AST.FormalParameter> params = fd.getParameters();
-                                List<Value> args = c.args();
-                                if (params != null && args != null && params.size() == args.size()) {
-                                    for (int k = 0; k < params.size(); k++) {
-                                        n += estimateLoadSize(args.get(k));
-                                        int argReg = getSourceReg(args.get(k), R_TMP1);
-                                        n += estimateStoreSize(new Variable(
-                                                new Symbol(params.get(k).getIdentifier().getName(), null)), argReg);
-                                    }
-                                }
-                            }
-                            // 2. JSR
+                            // No argument shuffling here; just:
+                            // 1. JSR
                             n += 1;
-                            // 3. Return value
+                            // 2. Store return value from R27 (if needed)
                             if (c.dest() != null) {
                                 n += estimateStoreSize(c.dest(), 27);
                             }
@@ -3376,15 +3363,25 @@ public class Compiler {
         // ---------------------------------------------------------------------
 
         private void emitReturn(Assign a) {
+            // 1. If there is a return value, evaluate it and move it into R27
             if (a.left() != null) {
-                // If there is a return value, put it in R27 (convention?)
-                // Or R1? Let's use R27 as a temporary return register.
-                loadValue(a.left(), 27);
+                // Load the return expression into a temp register
+                int rVal = loadValue(a.left(), R_TMP1);
+
+                // Ensure the value is in R27 (our chosen return-value register)
+                if (rVal != 27) {
+                    // R27 = rVal + 0
+                    code.add(DLX.assemble(DLX.ADD, 27, rVal, R_ZERO));
+                }
             }
+
+            // 2. Emit RET with the correct register:
+            //    - RET 0  : halt program (main returns to "nowhere")
+            //    - RET 31 : return to caller (R[31] set by JSR)
             if ("main".equals(currentFunction)) {
-                code.add(DLX.assemble(DLX.RET, 0)); // Terminate
+                code.add(DLX.assemble(DLX.RET, 0));   // halt program
             } else {
-                code.add(DLX.assemble(DLX.RET, 31)); // Return to caller
+                code.add(DLX.assemble(DLX.RET, 31));  // jump to address in R[31]
             }
         }
 
@@ -3442,43 +3439,21 @@ public class Compiler {
             String fname = (c.function() == null) ? null : c.function().name();
 
             if (!isBuiltin(fname)) {
-                // User-defined function call
+            	// User-defined function call: assume IR + RA already set up registers.
                 if (funcEntryPC.containsKey(fname)) {
-                    // 1. Pass arguments
-                    // We need to map args to params.
-                    // Since we are using global register allocation, params are just variables.
-                    // We need to move args to param locations.
-                    if (funcs != null && funcs.containsKey(fname)) {
-                        AST.FunctionDeclaration fd = funcs.get(fname);
-                        List<AST.FormalParameter> params = fd.getParameters();
-                        List<Value> args = c.args();
-                        if (params != null && args != null && params.size() == args.size()) {
-                            for (int i = 0; i < params.size(); i++) {
-                                String paramName = params.get(i).getIdentifier().getName();
-                                Value argVal = args.get(i);
-                                // Move argVal to paramName
-                                // Load argVal into temp
-                                int rArg = loadValue(argVal, R_TMP1);
-                                // Store into param variable
-                                storeVar(rArg, new Variable(new Symbol(paramName, null)));
-                            }
-                        }
-                    }
-
-                    // 2. JSR to function
                     int targetPC = funcEntryPC.get(fname);
+
+                    // Just jump to the function entry.
                     code.add(DLX.assemble(DLX.JSR, targetPC * 4));
 
-                    // 3. Handle return value
+                    // Return value convention: in R27 (set by emitReturn).
                     if (c.dest() != null) {
-                        // Result is in R27
                         storeVar(27, c.dest());
                     }
-                    return;
+                } else {
+                    // Unknown function name – emit an error instruction so we notice.
+                    code.add(DLX.assemble(DLX.ERR));
                 }
-
-                // Unknown function
-                code.add(DLX.assemble(DLX.ERR));
                 return;
             }
 

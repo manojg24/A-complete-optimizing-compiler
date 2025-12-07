@@ -38,6 +38,11 @@ public class IntType extends Type {
         }
         return super.div(that);
     }
+    
+    @Override
+    public Type not() {
+        return this;   // 'not' on int stays int
+    }
 
     @Override
     public Type compare(Type that) {

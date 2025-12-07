@@ -27,6 +27,15 @@ public class BoolType extends Type {
     public Type not() {
         return this;
     }
+    
+    @Override
+    public Type compare(Type that) {
+        if (that instanceof BoolType) {
+            // comparing two bools yields a bool
+            return new BoolType();
+        }
+        return super.compare(that);
+    }
 
     @Override
     public Type assign(Type source) {

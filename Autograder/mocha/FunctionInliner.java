@@ -182,6 +182,19 @@ public class FunctionInliner {
                     postBlock.preds().add(clone);
                     continue;
                 }
+                
+                if (t instanceof Assign a && "ret".equals(a.opcode())) {
+                    if (call.dest() != null && a.left() != null) {
+                        // ret R1  => move that value into the call destination (b in your test)
+                        Value retVal = renameValue(a.left(), varMap);
+                        clone.addInstruction(
+                            Compiler.prettyAssign(++nextTacId, call.dest(), "mov", retVal, null)
+                        );
+                    }
+                    clone.succs().add(postBlock);
+                    postBlock.preds().add(clone);
+                    continue;
+                }
 
                 clone.addInstruction(cloneTAC(t, varMap));
             }
@@ -219,6 +232,18 @@ public class FunctionInliner {
 
     private TAC cloneTAC(TAC t, Map<String, String> varMap) {
         if (t instanceof Assign a) {
+            // Safety: never clone raw "ret" assigns
+            if ("ret".equals(a.opcode())) {
+                // Should have been handled in performInlining; make it a dead mov
+                return Compiler.prettyAssign(
+                    ++nextTacId,
+                    new Variable(new Symbol("_dead_ret_" + (++tmpCounter), null)),
+                    "mov",
+                    new Literal(0),
+                    null
+                );
+            }
+
             Value L = renameValue(a.left(), varMap);
             Value R = renameValue(a.right(), varMap);
             Variable D = (Variable) renameValue(a.dest(), varMap);
@@ -232,7 +257,7 @@ public class FunctionInliner {
             Variable D = (c.dest() != null) ? (Variable) renameValue(c.dest(), varMap) : null;
             return new Call(++nextTacId, c.function(), newArgs, D);
         }
-        return t; // Should not happen for other types in this subset
+        return t;
     }
 
     private record InlineCandidate(BasicBlock bb, Call call) {
