@@ -1,0 +1,48 @@
+main
+
+int num_elems;
+int[15] global_vals;
+
+function intSumIter (int[] vals, int elems) : int
+{
+    int i;
+    int sum;
+
+    if (elems < 0) then
+        return -1;
+    fi;
+
+    //i = 0;
+    //sum = 0;
+    while (i < elems) do
+        sum += vals[i];
+        i++;
+    od;
+    return sum;
+};
+
+function intSumRecur (int[] vals, int elems) : int
+{
+    if (elems < 0) then
+        return -1;
+    fi;
+
+    if (elems == 0) then
+        return 0;
+    fi;
+
+    return vals[elems - 1] + call intSumRecur(vals, elems - 1);
+};
+
+{
+    num_elems = 0;
+    while (num_elems < 15) do
+        global_vals[num_elems] = call readInt();
+        num_elems++;
+    od;
+    call printInt(call intSumIter(global_vals, num_elems));
+    call println();
+
+    call printInt(call intSumRecur(global_vals, num_elems));
+    call println();
+}.

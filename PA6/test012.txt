@@ -1,0 +1,19 @@
+// testing function calls
+
+main
+
+float f1, f2, f3;
+
+function add(float x, float y) : float {
+  return x + y;
+};
+
+{
+  f1 = call readFloat();
+  f2 = 1.15;
+
+  f3 = call add(f1, f2);
+  call printFloat(f3);
+
+  call printFloat( f3 - f1 );
+}.

@@ -1,0 +1,19 @@
+main
+int a,b,c,d,e,f,g,h;
+
+{
+    a = 7;
+    b = a + 2;
+    c = a + b;
+    d = c + b;
+    b = c + b;
+    a = a + b;
+    e = c + d;
+    f = c + d;
+    g = a + b;
+    h = e + f;
+
+    //g and h are live
+    call printInt(g); // 57 
+    call printInt(h); // 82 
+}.

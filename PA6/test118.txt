@@ -1,0 +1,52 @@
+// Array handling SSA test, local array shadows global
+main
+int i, j, k, w, z, x, y;
+int [ 10 ] a;
+
+function use_global () : void
+{
+	i = 1;
+	a[1] = 5;
+	j = 2;
+	a[j] = 19;
+	if (a[ i ] < a [ j ]) then
+		a[i] = a[i] + 1;
+	else 
+		a[j] = a[j] - 1; // dead code
+	fi;
+	k = a[ j ];
+	call printInt(k); // 19
+	w = a[ i ];
+	call printInt(w);  // 6
+};
+
+function use_local() : void
+{
+    int i,j;
+    int [20] a;
+
+	i = 1;
+	j = 2;
+	a[i] = 15;
+	a[j] = 5;
+	if (a[ i ] < a [ j ]) then
+		a[i] = a[j] + 1;  // dead code
+	else 
+		a[j] = a[i] - 1;
+	fi;
+	j = a[ j ];
+	call printInt(j); // 14
+	i = a[ i ];
+	call printInt(i); // 15
+    i = 1000;
+    j = 5000;
+};
+
+{
+	call use_local();
+	call use_global();
+    call printInt(i); //must not see 1000 -> 1
+    call printInt(j); //must not see 5000 -> 2 
+}.
+
+// note: solution bug a[i]++ and a[j]--

@@ -1,0 +1,19 @@
+// Testing global variable access in function and literal arguments
+
+main
+
+int a;
+
+function foo (int x, int y) : void
+{
+
+    call printInt(x);
+    call printInt(y);
+    call printInt(a); //should print global a
+    
+};
+
+{
+    a = 1;
+    call foo(2, 3);
+}.

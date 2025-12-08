@@ -1,0 +1,31 @@
+main
+// cf
+int x, y, z;
+bool a, b;
+{
+    y = 2;
+    x = y * 2;
+    x = 2 * y;
+    x = x + 2 * y + x;
+    x = y * 1;
+    x = y * z; // z uninitialized
+    x = y * 0;
+    x = y ^ 0;
+    x = 0 / y;
+    x = y - y;
+    x = y / y;
+    x = y + 0;
+    z = (x + y) - y;
+
+    b = false;
+    a = b or true;
+    a = b and false;
+
+    call printInt(x);
+    call printInt(y);
+    call printInt(z);
+
+    call printBool(a);
+    call printBool(b);
+
+}.

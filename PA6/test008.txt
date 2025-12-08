@@ -1,0 +1,29 @@
+// Testcase nested if/else condition for RegAllocation and CodeGeneration
+
+main
+
+int a, b, c, d, e;
+
+{
+    a = 1;
+    b = a + 1;
+    c = b + 1;
+    d = c + 1;
+    e = d * 2;
+    if ( a > b )
+    then 
+      if (c > d)
+      then
+        call printInt(c);
+      else
+        call printInt(d);
+      fi;
+    else
+      if (b > e)
+      then 
+        call printInt(b);
+      else
+        call printInt(e);
+      fi;
+    fi;
+}.

@@ -1,0 +1,21 @@
+main
+
+// only 1 register is enough - There is no spilling
+
+
+int a, b, c, d, e, f, g, h, i;
+
+{
+    a = call readInt();     // R1 = readInt()
+    b = a + 1;              // R1 = R1 + 1
+    c = b + 1;              // ditto
+    d = c + 1;
+    e = d + 1;
+    f = e + 1;
+    g = f + 1;
+    h = g + 1;
+    i = h + 1;              // R1 = R1 + 1
+
+    call printInt(i);           // print R1
+    call println();
+}.

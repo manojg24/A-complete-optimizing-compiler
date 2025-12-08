@@ -1,0 +1,40 @@
+// Tests constant left operands 
+// (DLX instructions only allow constants as right operands)
+
+main
+
+int a, b, c, d;
+bool e, f;
+
+{
+    a = 4;
+    b = 2;
+    c = 7;
+    d = 5;
+
+    a = 4 + b;
+    b = 12 - c;
+    c = 8 * d;
+    d = 3 / a;
+
+    call printInt(a);
+    call printInt(b);
+    call printInt(c);
+    call printInt(d);
+
+    a = 12 % b;
+    b = 3 ^ a;
+
+    call printInt(a);
+    call printInt(b);
+
+    e = true;
+    f = false;
+
+    e = false and f;
+    f = true or e;
+    e = 7 < c;
+
+    call printBool(e);
+    call printBool(f);
+}.

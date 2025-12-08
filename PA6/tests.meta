@@ -1,0 +1,52 @@
+test000, cp cf loop
+test000, cp cf dce
+test000, max
+test001, cf cp loop
+test001, cf cp loop, 3
+test004, cf cp dce loop, 12
+test004, max, 5
+test007, dce, 8
+test007, dce, 2
+test008, cp cf loop, 5
+test009, dce
+test011, cf cp loop, 3
+test014, dce, 3
+test110, max, 8
+test111, cf cp dce, 4
+test111, cf cp dce loop, 8
+test112, cp cf dce loop, 6
+test113, cf cp loop, 8
+test113, cse, 8
+test113, max, 8
+test114, dce, 2
+test114, max, 4
+test114, cf cp, 3 
+test114, cf cp loop, 4
+test115, cp cpp cf dce loop, 8
+test116, max, 4
+test118, cp cpp cf dce loop, 12
+test118, max, 8
+test119, cf cp cpp loop, 2
+test120, max, 5
+test202, cpp, 4
+test203, cp cf dce loop, 10
+test204-ssa, cp cf dce loop, 10
+test205-arr, cse
+test205-arr, cf cp cse loop
+test206-ofe, ofe
+test207, cse dce loop
+test209-cf, cf
+test209-cf, cf cp loop
+test209-cf, max
+test210, max
+test210, max, 2
+test211-ofe, dce
+test212-ssa-ofe, ofe
+test213-dce, dce
+test214-cf, cp cf loop
+test215, max
+test216, ofe
+test216, max
+test220, , 12
+test223-regAlloc, , 3
+test228, cf cse loop

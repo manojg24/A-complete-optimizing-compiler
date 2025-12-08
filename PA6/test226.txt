@@ -1,0 +1,29 @@
+// Test nested function calls
+
+main
+
+int a, b, c, d;
+
+function foo(int x) : int {
+    a = x + call bar(x);
+    return a;
+};
+
+function bar(int y) : int {
+    b = y * call boo(y);
+    return b;
+};
+
+function boo(int z) : int {
+    c = z;
+    return c;
+};
+
+{
+    call printInt( call foo(1) ); // 2  
+    call printInt( call bar(2) ); // 4
+    call printInt( call boo(3) ); // 3
+
+    d = a + b + c;
+    call printInt(d); // 9
+}.

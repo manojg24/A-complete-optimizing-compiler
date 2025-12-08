@@ -1,0 +1,30 @@
+// simple reg allocation and code gen
+// only allocate for a,b 
+// float version of test007
+
+main
+
+float a, b, c, d, e;
+
+{
+  a = 5.7;
+  b = 6.1;
+  c = a + b;
+  b = a + b; 
+  e = c;
+  while (a > 5.1)
+  do 
+    d = a + b;
+    a = a - 0.5;
+
+  od;
+  c = a + b;
+  d = a + b;
+  e = c;
+  
+  
+  call printFloat(a); //live
+  
+  call printFloat(b); //live
+
+}.

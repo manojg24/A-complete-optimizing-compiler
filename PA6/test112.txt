@@ -1,0 +1,26 @@
+main
+
+int a, A, a_0, intVar;
+
+// cp cf dce
+{
+    a = 5 + 2;
+    A = a * -10;
+    a_0 = A;
+    intVar = 3 - 3;
+    intVar = a;
+    A++;
+    A--;
+    a += 5 + 2;
+    a -= 5 + -5;
+    a *= (a_0-a_0+1); // as
+    a /= a;
+    call printInt(a); // 1
+    call println();
+    call printInt(a_0); // -70
+    call println();
+    call printInt(A); // -70
+    call println();
+    call printInt(intVar); // 7
+    call println();
+}.

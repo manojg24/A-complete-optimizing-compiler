@@ -1,0 +1,23 @@
+// Repeat Statement
+main
+
+int i, n;
+bool flag;
+
+{
+
+    n = call readInt();
+    i = 1;
+    flag = false;
+
+    if (n > 1) then
+        repeat
+            i+=1;
+            if (n % i == 0) then
+                flag = true;
+            fi;
+        until (i >= (n - 1));
+    fi;
+
+    call printBool((not flag));
+}.

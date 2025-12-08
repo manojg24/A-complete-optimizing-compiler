@@ -1,0 +1,20 @@
+// handling codegen for literals in different combinations
+
+main
+
+int a, b, c, d;
+
+{
+
+  a = call readInt();
+  b = call readInt();
+
+  c = b * 9 + a - 1;
+  b = b * 3;
+  d = 4 + a;
+  a = 3 + 4;
+  b = 3 + 5 * 8;
+
+  call printInt( b );
+  call printInt( d );
+}.

@@ -1,0 +1,44 @@
+//Generating many temps to test register allocation and spilling
+main 
+
+int s, t, u, v, x, y, z;
+int[10][10] arr1;
+bool a, b;
+
+function output(): void {
+	call printInt(u);
+	call printInt(y);
+	call printBool(b);
+	z = 0;
+	s = 0;
+	call printInt(arr1[z][s]);
+	call printInt(arr1[y][5]); 
+};
+
+{	
+	t = 23;
+	x = 10;
+	u = call readInt();
+ 	y = call readInt();
+ 	b = call readBool();
+ 	a = ((u + y) > 10) and not(call readBool()) or b;
+ 	v = t + x - y;
+ 	z = 0;
+ 	s = 0;
+ 	arr1[y][5] = 12;
+ 	if (u > v) then
+ 		while (z < 10) do
+ 			while (s < 10) do
+ 				if (a) then
+ 					arr1[z][s] = v - t * 14;
+ 				else 
+ 					arr1[z][s] = (u * y) - 4;
+ 				fi;
+ 				s++;
+ 			od;
+ 			z++;
+ 		od;
+ 	fi;
+	
+	call output();
+}.

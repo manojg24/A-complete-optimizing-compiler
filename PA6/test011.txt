@@ -1,0 +1,12 @@
+// cf
+main
+float x, y;
+
+{
+    x = 1.0 * 2.0 - 0.5;
+    call printFloat(x);
+    call println();
+    y = x / 0.25;
+    call printFloat(y);
+    call println();
+}.

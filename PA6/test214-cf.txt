@@ -1,0 +1,18 @@
+// Testing non-needed branches
+
+main
+int x, y;
+{
+    x = 10;
+	y = 1;
+	if (x < y) then
+		if (x < y) then
+			x = x * y;
+		else
+			y = 26;
+		fi;
+	else
+		call printInt(x);
+	fi;
+
+}.

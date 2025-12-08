@@ -1,0 +1,52 @@
+// giant optimization 
+// CSE, CP, DCE, CF, AS
+
+main
+
+int x, y, z;
+int n, s, i, j, m, p, f;
+int a, b, c;
+int r, v, u, t;
+
+{
+    n = 5;
+    s = 0;
+    i = 0;
+    while (i <= n)  do
+        j = i;
+        m = n;
+        p = m;
+        f = 1;
+        while (p > 1) do
+            f *= p;
+            p--;
+        od;
+
+        a = f;
+        p = m - j;
+
+        f = 1;
+        while (p > 1) do
+            f *= p;
+            p--;
+        od;
+
+        b = f;
+        c = a + b;
+        s += c;
+        i++;
+    od;
+
+    y = s;
+    z = 4;
+    v = y + y;
+    u = z + 2;
+    r = s + s;
+    t = r + v;
+    x = u + t;
+
+    // s and x are live
+    call printInt(s); // 874
+    call printInt(x); // 3502
+    call println();
+}.

@@ -1,0 +1,23 @@
+main
+int a, b, c, max;
+// max
+{
+
+    a = 2;
+    b = 1;
+    c = 3;
+    if ( a > b ) then
+        if( a > c ) then
+            max = a;
+        else
+            max = c;
+        fi;
+    else
+        if( b > c ) then
+            max = b;
+        else
+            max = c;
+        fi;
+    fi;
+    call printInt(max);
+}.

@@ -1,0 +1,30 @@
+// this entire sort can be done at compile time, 
+// cp cf cpp dce max
+
+main
+	int a, b, c, d, e;
+	int tmp;
+{
+	a = 31;
+	b = 69;
+	c = 110;
+	d = 52;
+	e = 8;
+
+	// sorting network of size 5
+	if (a < d) then tmp = a; a = d; d = tmp; fi;
+	if (b < e) then tmp = b; b = e; e = tmp; fi;
+	if (a < c) then tmp = a; a = c; c = tmp; fi;
+	if (b < d) then tmp = b; b = d; d = tmp; fi;
+	if (a < b) then tmp = a; a = b; b = tmp; fi;
+	if (c < e) then tmp = c; c = e; e = tmp; fi;
+	if (b < c) then tmp = b; b = c; c = tmp; fi;
+	if (d < e) then tmp = d; d = e; e = tmp; fi;
+	if (c < d) then tmp = c; c = d; d = tmp; fi;
+
+	call printInt(a); // 110
+	call printInt(b); // 69
+	call printInt(c); // 52
+	call printInt(d); // 31
+	call printInt(e); // 8
+}.

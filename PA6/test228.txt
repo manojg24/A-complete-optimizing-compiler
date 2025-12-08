@@ -1,0 +1,26 @@
+//cse
+
+main
+
+int i, j;
+float k, w, z, x, y;
+float[8] a, b;
+
+{
+    i = 1;
+    a[1] = 4.2;
+    x = a[i];
+    k = a[i * 1];
+    j = 2;
+    b[j] = 11.5;
+    while (a[i] < b[j]) do
+        k = a[i] + a[i]; // k reassigned before usage, no phi needed
+        a[i] = k + 0.5;
+        z = a[i]; // z reassigned before usage, no phi needed
+        call printFloat(z);
+    od;
+    call println();
+
+    w = a[i];
+    call printFloat(w);
+}.

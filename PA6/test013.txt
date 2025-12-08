@@ -1,0 +1,31 @@
+// Tests Overloaded Functions
+main
+
+int a, b, c;
+float d, e, f;
+
+function foo(int x, int y) : int {
+  x += 5;
+  y -= 2;
+  return x + y;
+};
+
+function foo(float x, float y) : float {
+  x += 5.0;
+  y -= 2.0;
+  return x + y;
+};
+
+{
+  a = call readInt(); // Any value should work
+  c = 2;
+
+  b = call foo(a, c); // Should return the value of a
+  call printInt(b); // Should print the value of a
+
+  d = call readFloat();
+  e = 10.5;
+  
+  f = call foo(d, e); // Call our overloaded function
+  call printFloat(f); // Print the output of foo(float, float)
+}.

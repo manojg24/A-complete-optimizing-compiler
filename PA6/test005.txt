@@ -1,0 +1,22 @@
+// Tests Function Calls -- Proper return value, proper argument values, saved registers
+
+main
+
+int a, b, c;
+
+function foo(int x, int y) : int {
+  x += 5;
+  y -= 2;
+  return x + y;
+};
+
+{
+  a = call readInt(); 
+  c = 2;
+
+  b = call foo(a, c); // return a + 5 + c - 2
+  call printInt(b); 
+
+  call printInt( a + c ); // Should print a + 2
+
+}.

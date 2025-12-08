@@ -1,0 +1,25 @@
+//DCE Early Return
+
+main
+int x,y;
+
+function func() : int {
+    x = 0;
+    if (x == y) then
+       return x;
+
+        //All gone
+       while (true==false) do
+            x = 3;
+       od;
+       call printInt(x);
+    else
+       x = 2;
+    fi;
+    return x;
+};
+
+
+{
+    call printInt(call func());
+}.

@@ -1,0 +1,27 @@
+// The third line in the then block, the two lines before the if and he 
+// lines after the fi are not part of the original test case. 
+// Check phi insertions
+
+main
+
+function test(): void {
+	int a, b, c;
+
+	a = 12;
+	b = 13;
+	if (a < b) then
+		b = a + 5;
+		a = a + 1;
+	else
+		a = a + 1;
+		c = 2;
+	fi;
+	b = c + 1;
+	a = a + 1;
+	call printInt(a); // 14
+    call printInt(b);  // 1: c is unitialized, default to 0
+};
+
+{
+	call test();
+}.

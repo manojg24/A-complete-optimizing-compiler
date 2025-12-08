@@ -1,0 +1,23 @@
+//Testing global variables and function calls for dce
+
+main
+int i, j;
+
+function foo() : void {
+	i = 4;
+};
+
+function baz() : void {
+	j = 1;
+};
+
+{
+	i = 1;
+	j = 0;
+	i = j;
+	call foo();
+	call baz();
+	j = i;
+	call foo();
+    call printInt(i);
+}.

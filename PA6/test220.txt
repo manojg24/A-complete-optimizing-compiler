@@ -1,0 +1,58 @@
+// nested ifs and #vars > #regs
+main
+
+int a, b, c, d, e, f, g, h, i, j, k, l, m, n, o;
+
+{
+    a = 1;
+    b = 1;
+    c = 2;
+    d = 2;
+    e = 6;
+    f = 6;
+    g = 7;
+    h = 8;
+    i = 9;
+    j = 9;
+    k = 9;
+    l = 1;
+    m = 12;
+    n = 14;
+    o = 15;
+
+    a = call readInt();
+    if (a == b) then
+        if (d == c) then // comment
+            if (e == f) then
+                g += g;
+                call printInt(g);
+            else
+                call printInt(h);
+            fi;
+        else
+            call printInt(i);
+        fi;
+    else
+        j = call readInt();
+        call printInt(j);
+    fi;
+    call println();
+    
+    if (i == k) then
+        if (l != m) then // comment
+            if (n != o) then
+                h += h;
+                call printInt(h);
+            else
+                call printInt(g);
+            fi;
+        else
+            call printInt(i);
+        fi;
+    else
+        o = call readInt();
+        call printInt(a);
+    fi;
+    call println();
+
+}.

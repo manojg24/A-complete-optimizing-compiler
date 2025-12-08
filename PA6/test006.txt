@@ -1,0 +1,67 @@
+// test code gen
+
+main
+
+int a;
+bool b;
+int [2] arrA;
+bool [2] arrB;
+
+function foo (int x) : int
+{
+    int y;
+    y = 5;
+    while (x < 0) do
+        x += y;
+    od;
+    return x;
+};
+
+function bar (bool y) : bool
+{
+    if (y) then
+        return not y;
+    else
+        y = y and true or (y == y);
+    fi;
+    return true;
+};
+
+function fizz () : void
+{
+    int z;
+    z = 5;
+    repeat
+        call printInt(z);
+        call println();
+        z--;
+    until (z == 0);
+};
+
+{
+    a = -10;
+    b = false;
+    arrA[0] = call foo(a);
+    arrA[1] = 20;
+    arrB[0] = call bar(b);
+    arrB[1] = false;
+
+    call fizz(); // 5 4 3 2 1
+
+    call printInt(a); // -10
+    call println();
+
+    call printBool(b); // false
+    call println();
+    
+    call printInt(arrA[0]); // 5
+    call println();
+    
+    call printInt(arrA[1]); // 20
+    call println();
+    
+    call printBool(arrB[0]); // true
+    call println();
+    
+    call printBool(arrB[1]); // false
+}.

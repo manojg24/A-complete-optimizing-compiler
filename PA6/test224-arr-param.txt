@@ -1,0 +1,39 @@
+// Arrays in Function
+
+main
+int[4][3] x;
+int[12] y;
+int j, c;
+
+function arrayAccept(int[] j) : void {
+  int k, o;
+  
+  k = 0;
+  while(k< 4) do
+    o = 0;
+    while(o < 3) do
+      x[k][o] = k*o;
+      o++;
+    od;
+    k++;
+  od;
+  k = 0;
+  while(k <12) do 
+    call printInt(j[k] * y[k]);
+    call printInt(x[k/3][k%3]);
+    call println();
+    k++;
+  od;
+
+};
+
+
+{
+  j = 2;
+  c = 0;
+  while(c < 12) do
+    y[c] = j*c;
+    c++;
+  od;
+  call arrayAccept(y);
+}.

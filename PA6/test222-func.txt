@@ -1,0 +1,23 @@
+// Testing recursive calls
+main
+
+int a, b;
+
+function fibonacci(int a) : int {
+    if (a <= 0) then
+        return 0;
+    else
+        if (a <= 2) then
+            return 1;
+        else
+            return call fibonacci(a - 1) + call fibonacci(a - 2);
+        fi;
+    fi;
+};
+
+{
+    a = call fibonacci(5); // 5
+    b = call fibonacci(3); // 2
+    call printInt(a + b);
+
+}.

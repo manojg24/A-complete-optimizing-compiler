@@ -1,0 +1,18 @@
+main
+
+int a, b, c, d;
+
+// cp cf dce
+{
+    d = 5 + 2 * 10 - 2;
+    b = 5 + -2 * -10 + 2;
+    a = b + c + d;
+    b = a * a + b * b;
+    a = 5 + 2 * b;
+    a = 2 * c + d;
+    a = a - c / (d - d + 1);
+    call printInt(a); // 23
+    call println();
+    call printInt(b); // 3229
+    call println();
+}.

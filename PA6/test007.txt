@@ -1,0 +1,29 @@
+//simple reg allocation and code gen
+//only allocate for a,b 
+
+main
+
+int a,b,c,d,e;
+
+{
+  a = 5;
+  b = 6;
+  c = a + b;
+  b = a + b; 
+  e = c;
+  while (a > 5)
+  do 
+    d = a + b;
+    a = a + 1;
+
+  od;
+  c = a + b;
+  d = a + b;
+  e = c;
+  
+  
+  call printInt(a); //live
+  
+  call printInt(b); //live
+
+}.

@@ -1,0 +1,25 @@
+//cse
+
+main
+
+int i, j, k, w, z, x, y;
+int[8] a, b;
+
+{
+    i = 1;
+    a[1] = 5;
+    x = a[i];
+    k = a[i * 1];
+    j = 2;
+    b[j] = 19;
+    while (a[i] < b[j]) do
+        k = a[i] + a[i]; // k reassigned before usage, no phi needed
+        a[i] = k + 1;
+        z = a[i]; // z reassigned before usage, no phi needed
+        call printInt(z); // 11 23
+    od;
+    call println();
+
+    w = a[i];
+    call printInt(w); // 23
+}.

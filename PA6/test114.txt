@@ -1,0 +1,14 @@
+//cf dce 
+//uninitialized vars as
+
+main 
+int a,b,c,d;
+{
+    a = b+c+d+0; 
+    b = a*a+b*b*1;
+    a = 5+2*b;
+    c = 2*c+d;
+    a = a+c*b+d; 
+    d = 5 + 2 * 10 + 2;
+    call printInt(d);
+}.

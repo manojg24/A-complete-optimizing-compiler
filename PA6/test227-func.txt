@@ -1,0 +1,18 @@
+main
+
+float a;
+int b;
+
+function dec(float a, int b) : float {
+    repeat
+        a = a * 0.5;
+        b = b - 1;
+    until (b == 0);
+
+    return a;
+};
+
+{
+    call printFloat(call dec(5.5, 4));
+
+}.

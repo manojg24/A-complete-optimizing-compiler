@@ -1,0 +1,19 @@
+main
+
+int i, j;
+int[3][3] x, y, z;
+
+// cpp cse dce
+{
+    repeat
+        j = 0;
+        repeat
+            x[i][j] = y[i][j] + z[i][j];
+            call printInt(x[i][j]);
+            j += 1;
+        until(j>2);
+        i += 1;
+        call println();
+    until(i>2);
+    
+}.

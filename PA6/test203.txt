@@ -1,0 +1,21 @@
+// cp cf dce max
+
+main
+
+int i, j, cp, b;
+{
+    i = 0;
+    j = 0;
+    cp = 30;
+    while(i< 10) do
+        b = 10;
+        while(j< 10) do
+            b = b + 1;
+            j += 1;
+        od;
+        b = 10;
+        i += 1;
+    od;
+    b = b + cp;
+    call printInt(b);
+}.
