@@ -2759,11 +2759,32 @@ public class Compiler {
         return graph;
     }
 
+ // Choose which physical registers are allowed for allocation.
+    private static List<Integer> allocRegPool(int K) {
+        List<Integer> pool = new ArrayList<>();
+
+        // Skip R0..R4 (R1..R4 are temps), and avoid R27..R31.
+        int r = 5;
+        while (pool.size() < K && r < 27) { // 27 is return register
+            pool.add(r);
+            r++;
+        }
+        return pool;
+    }
+
     // =========================================================================
     // GRAPH COLORING (CHAITIN-STYLE)
     // =========================================================================
-
     private static RegAllocResult colorGraph(Map<String, Set<String>> graph, int K) {
+        // Build the physical register pool
+        List<Integer> pool = allocRegPool(K);
+        int realK = pool.size();
+        if (realK == 0) {
+            // No usable registers => everything is spilled
+            return new RegAllocResult(Collections.emptyMap(), new HashSet<>(graph.keySet()));
+        }
+
+        // Copy graph so we can destructively simplify it
         Map<String, Set<String>> work = new HashMap<>();
         for (var e : graph.entrySet()) {
             work.put(e.getKey(), new HashSet<>(e.getValue()));
@@ -2772,11 +2793,13 @@ public class Compiler {
         List<String> stack = new ArrayList<>();
         Set<String> spilled = new HashSet<>();
 
+        // Simplify phase
         while (!work.isEmpty()) {
             String low = null;
 
+            // Try to find a node with degree < realK
             for (var e : work.entrySet()) {
-                if (e.getValue().size() < K) {
+                if (e.getValue().size() < realK) {
                     low = e.getKey();
                     break;
                 }
@@ -2786,6 +2809,7 @@ public class Compiler {
             if (low != null) {
                 n = low;
             } else {
+                // Pick a high-degree node as a spill candidate
                 n = null;
                 int best = -1;
                 for (var e : work.entrySet()) {
@@ -2795,21 +2819,24 @@ public class Compiler {
                         n = e.getKey();
                     }
                 }
-                if (n != null)
+                if (n != null) {
                     spilled.add(n);
+                }
             }
 
             Set<String> neigh = work.remove(n);
             if (neigh != null) {
                 for (String m : neigh) {
                     Set<String> s = work.get(m);
-                    if (s != null)
+                    if (s != null) {
                         s.remove(n);
+                    }
                 }
             }
             stack.add(n);
         }
 
+        // Select phase
         Map<String, Integer> color = new HashMap<>();
 
         while (!stack.isEmpty()) {
@@ -2823,19 +2850,18 @@ public class Compiler {
             }
 
             int chosen = -1;
-            // Start from 1 to avoid R0 (always zero)
-            // Skip reserved registers: 28 (FP), 29 (SP), 30 (GP), 31 (RET)
-            for (int c = 1; c < K; c++) {
-                if (c >= 28 && c <= 31)
-                    continue;
-                if (!used.contains(c)) {
-                    chosen = c;
+            for (int r : pool) {
+                if (!used.contains(r)) {
+                    chosen = r;
                     break;
                 }
             }
 
             if (chosen >= 0) {
                 color.put(n, chosen);
+                // If we previously marked it as "spilled" pessimistically, but we
+                // actually found a color, remove it from spill set.
+                spilled.remove(n);
             } else {
                 spilled.add(n);
             }
@@ -2852,13 +2878,13 @@ public class Compiler {
             return null;
         String name = v.toString();
 
-        if (colors.containsKey(name)) {
-            int c = colors.get(name);
+        // If we colored it, turn it into a physical register Rk
+        Integer c = colors.get(name);
+        if (c != null && !spilled.contains(name)) {
             return new ir.tac.Variable(new mocha.Symbol("R" + c, null));
         }
-        if (spilled.contains(name)) {
-            return new ir.tac.Variable(new mocha.Symbol("M_" + name, null));
-        }
+
+        // Spilled or uncolored: keep original name -> memory variable
         return v;
     }
 
@@ -2960,21 +2986,51 @@ public class Compiler {
 
         List<Integer> generate(List<BasicBlock> blocks) {
             if (blocks == null || blocks.isEmpty()) {
-                return new java.util.ArrayList<>();
+                return new ArrayList<>();
             }
 
-            // Identify which blocks are reachable from the entry block (main CFG region)
-            this.mainRegion = computeMainRegion(blocks);
+            // Reorder: main CFG first, then all other blocks (functions, dead).
+            List<BasicBlock> ordered = orderBlocks(blocks);
 
-            // 1) Collect all variables and give them memory locations.
-            collectVariables(blocks);
+            // Recompute which blocks belong to main (reachable from entry).
+            BasicBlock entry = blocks.get(0);
+            java.util.Set<BasicBlock> mainSet = new java.util.LinkedHashSet<>();
+            java.util.ArrayDeque<BasicBlock> q = new java.util.ArrayDeque<>();
+            mainSet.add(entry);
+            q.add(entry);
+            while (!q.isEmpty()) {
+                BasicBlock b = q.removeFirst();
+                if (b.succs() == null) continue;
+                for (BasicBlock s : b.succs()) {
+                    if (s != null && mainSet.add(s)) {
+                        q.add(s);
+                    }
+                }
+            }
+
+            // Identify the last block that is part of main’s CFG in the ordered list.
+            BasicBlock lastMainBlock = null;
+            for (BasicBlock b : ordered) {
+                if (mainSet.contains(b)) {
+                    lastMainBlock = b;
+                } else {
+                    // first non-main block ⇒ we've passed all main blocks
+                    break;
+                }
+            }
+
+            // 1) Collect all variables and give them memory locations using the ordered list.
+            collectVariables(ordered);
 
             // 2) First pass: compute starting PC for each block (instruction counts only).
+            blockPC.clear();
+            funcEntryPC.clear();
+
             int pc = 0;
-            for (BasicBlock b : blocks) {
+            for (BasicBlock b : ordered) {
                 blockPC.put(b, pc);
 
-                // Check for function entry label
+                // Capture function entry labels (for user-defined calls).
                 for (ir.tac.TAC t : b.instructions()) {
                     if (t instanceof ir.tac.Assign a && "label".equals(a.opcode())) {
                         if (a.dest() != null) {
@@ -2983,35 +3039,24 @@ public class Compiler {
                     }
                 }
 
-                int size = estimateBlockSize(b);
+                pc += estimateBlockSize(b);
 
-                if (mainRegion.contains(b) &&
-                    (b.succs() == null || b.succs().isEmpty()) &&
-                    !endsWithRet(b)) {
-
-                    size += 1;  // extra RET 0
+                // After the last main block, we will insert a RET 0 ⇒ +1 instruction.
+                if (b == lastMainBlock) {
+                    pc += 1;
                 }
-
-                pc += size;
             }
 
             // 3) Second pass: actually emit instructions with correct branch offsets.
             code.clear();
-            currentFunction = null;
-
-            for (BasicBlock b : blocks) {
+            for (BasicBlock b : ordered) {
                 emitBlock(b);
 
-                // Mirror the logic used in the size estimation pass: actually emit RET 0.
-                if (mainRegion.contains(b) &&
-                    (b.succs() == null || b.succs().isEmpty()) &&
-                    !endsWithRet(b)) {
-
+                // Insert program-terminating RET 0 immediately after main’s CFG.
+                if (b == lastMainBlock) {
                     code.add(DLX.assemble(DLX.RET, 0));
                 }
             }
-
-            code.add(DLX.assemble(DLX.RET, 0));
 
             return code;
         }
@@ -3050,39 +3095,41 @@ public class Compiler {
         }
         
         private List<BasicBlock> orderBlocks(List<BasicBlock> blocks) {
-            if (blocks.isEmpty()) return blocks;
+            if (blocks == null || blocks.isEmpty()) {
+                return new ArrayList<>();
+            }
 
-            // 1. Find all blocks reachable from entry block (blocks.get(0)).
             BasicBlock entry = blocks.get(0);
-            Set<BasicBlock> mainRegion = new HashSet<>();
-            Deque<BasicBlock> work = new ArrayDeque<>();
 
-            mainRegion.add(entry);
-            work.add(entry);
+            // BFS from entry over succs to find all blocks reachable from main.
+            java.util.Set<BasicBlock> mainSet = new java.util.LinkedHashSet<>();
+            java.util.ArrayDeque<BasicBlock> q = new java.util.ArrayDeque<>();
+            mainSet.add(entry);
+            q.add(entry);
 
-            while (!work.isEmpty()) {
-                BasicBlock b = work.removeFirst();
+            while (!q.isEmpty()) {
+                BasicBlock b = q.removeFirst();
                 if (b.succs() == null) continue;
                 for (BasicBlock s : b.succs()) {
-                    if (mainRegion.add(s)) {
-                        work.add(s);
+                    if (s != null && mainSet.add(s)) {
+                        q.add(s);
                     }
                 }
             }
 
-            // 2. First: all non-main-region blocks (functions).
-            // 3. Then: all main-region blocks.
-            List<BasicBlock> ordered = new ArrayList<>();
+            // Preserve original order, but put main-reachable first, then everything else.
+            List<BasicBlock> ordered = new java.util.ArrayList<>();
             for (BasicBlock b : blocks) {
-                if (!mainRegion.contains(b)) {
+                if (mainSet.contains(b)) {
                     ordered.add(b);
                 }
             }
             for (BasicBlock b : blocks) {
-                if (mainRegion.contains(b)) {
+                if (!mainSet.contains(b)) {
                     ordered.add(b);
                 }
             }
+
             return ordered;
         }
 
