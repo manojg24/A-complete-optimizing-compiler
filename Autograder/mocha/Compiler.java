@@ -1101,6 +1101,14 @@ public class Compiler {
             for (ir.tac.TAC t : bb) {
                 if (t instanceof ir.tac.Assign a) {
                     String op = a.opcode();
+                    
+                    if (doCSE && a.dest() != null) {
+                        String defName = a.dest().toString();
+                        // Remove any CSE entries whose key mentions this variable as an operand
+                        cse.entrySet().removeIf(e ->
+                            e.getKey().contains("V:" + defName)
+                        );
+                    }
 
                     // barriers
                     if ("label".equals(op) || "test".equals(op) || "ret".equals(op)) {
@@ -1138,20 +1146,6 @@ public class Compiler {
                             // Track reverse mapping for invalidation
                             reverseEnv.computeIfAbsent(srcName, k -> new HashSet<>()).add(destName);
                         }
-
-                        // Invalidate any mappings that depend on the redefined variable (dest)
-                        // If 'dest' is redefined, any other variable 'k' that was a copy of 'dest' (k =
-                        // dest) is now stale?
-                        // No, if k = dest, and dest changes, k still holds the OLD value of dest.
-                        // BUT, if we had env[k] -> dest, and dest is overwritten, then env[k] is now
-                        // pointing to a stale name?
-                        // Actually, in SSA-like form it's fine, but here variables are mutable.
-                        // If we have:
-                        // x = y => env[x] = y
-                        // y = z => env[y] = z
-                        // ... use x ...
-                        // If we replace x with y, we get 'z', which is WRONG. x should be the OLD y.
-                        // So if 'y' is redefined, we must remove 'y' from the RHS of any mapping.
 
                         String redefined = a.dest().toString();
                         if (reverseEnv.containsKey(redefined)) {
@@ -2287,14 +2281,37 @@ public class Compiler {
             boolean root = initStack.isEmpty();
             if (root)
                 enterInitScope();
+
+            boolean sawReturn = false;
+
             for (ast.Statement s : node) {
                 if (s == null)
                     continue;
                 s.accept(this);
                 if (s instanceof AST.ReturnStatement) {
-                    break;
+                    sawReturn = true;
+                    break; // nothing after a return in the same seq
                 }
             }
+
+            // If this is the top-level (main) and there was no explicit return,
+            // emit an implicit "ret" at the end so the program halts.
+            if (root && !sawReturn) {
+                final ir.tac.Value v = null;   // main returns void
+                final ir.tac.Variable tmp = newTmp();
+                cur.addInstruction(new ir.tac.Assign(newId(), tmp, v, null) {
+                    @Override
+                    protected String op() {
+                        return "ret";
+                    }
+
+                    @Override
+                    public String toString() {
+                        return "return";
+                    }
+                });
+            }
+
             if (root)
                 exitInitScope();
         }
@@ -2970,6 +2987,9 @@ public class Compiler {
 
         // BasicBlock → starting PC (instruction index)
         private final Map<BasicBlock, Integer> blockPC = new HashMap<>();
+        
+     // Track which TAC variables hold float values
+        private final Set<String> floatVars = new HashSet<>();
 
         // Result program as list of DLX words
         private final List<Integer> code = new ArrayList<>();
@@ -3060,6 +3080,49 @@ public class Compiler {
 
             return code;
         }
+        
+        private void markFloatVar(Variable v) {
+            if (v == null) return;
+            floatVars.add(v.toString());
+        }
+
+        private boolean isFloatValue(Value v) {
+            if (v instanceof Literal lit) {
+                return lit.value() instanceof Float;
+            }
+            if (v instanceof Variable var) {
+                return floatVars.contains(var.toString());
+            }
+            return false;
+        }
+
+        // Inspect a TAC instruction and update floatVars
+        private void trackFloatInfo(ir.tac.TAC t) {
+            if (t instanceof Assign a) {
+                Variable dst = a.dest();
+                if (dst == null) return;
+
+                Value L = a.left();
+                Value R = a.right();
+
+                // If either operand is known float, dest is float.
+                if (isFloatValue(L) || isFloatValue(R)) {
+                    markFloatVar(dst);
+                }
+            } else if (t instanceof Call c) {
+                Variable dst = c.dest();
+                if (dst == null) return;
+
+                String fname = (c.function() == null) ? null : c.function().name();
+
+                // If you have readFloat / other float-returning builtins, mark dest as float.
+                if ("readFloat".equals(fname)) {
+                    markFloatVar(dst);
+                }
+                // If you have other builtins or user functions that return float, you can
+                // add them here similarly.
+            }
+        }
 
         private Set<BasicBlock> computeMainRegion(List<BasicBlock> blocks) {
             Set<BasicBlock> visited = new HashSet<>();
@@ -3140,6 +3203,8 @@ public class Compiler {
         private void collectVariables(List<BasicBlock> blocks) {
             for (BasicBlock b : blocks) {
                 for (ir.tac.TAC t : b.instructions()) {
+
+                    // Existing var collection
                     if (t instanceof Assign a) {
                         addVar(a.dest());
                         addVal(a.left());
@@ -3147,10 +3212,14 @@ public class Compiler {
                     } else if (t instanceof Call c) {
                         addVar(c.dest());
                         if (c.args() != null) {
-                            for (Value v : c.args())
+                            for (Value v : c.args()) {
                                 addVal(v);
+                            }
                         }
                     }
+
+                    //track float-typed vars
+                    trackFloatInfo(t);
                 }
             }
         }
@@ -3466,36 +3535,46 @@ public class Compiler {
         private void emitArith(Assign a) {
             if (a.dest() == null)
                 return;
+
             String op = a.opcode();
+
+            // Decide if this is a float expression:
+            // any of dest / left / right is known float ⇒ use float ALU ops
+            boolean isFloat = floatVars.contains(a.dest().toString())
+                    || isFloatValue(a.left())
+                    || isFloatValue(a.right());
 
             int rL = loadValue(a.left(), R_TMP1);
             int rR = loadValue(a.right(), R_TMP2);
             int dstReg = R_TMP3;
 
             int dlxOp;
-            switch (op) {
-                case "add":
-                    dlxOp = DLX.ADD;
-                    break;
-                case "sub":
-                    dlxOp = DLX.SUB;
-                    break;
-                case "mul":
-                    dlxOp = DLX.MUL;
-                    break;
-                case "div":
-                    dlxOp = DLX.DIV;
-                    break;
-                case "mod":
-                    dlxOp = DLX.MOD;
-                    break;
-                case "pow":
-                    dlxOp = DLX.POW;
-                    break;
-                default:
-                    // unknown op, emit error instruction
-                    //code.add(DLX.assemble(DLX.ERR));
-                    return;
+
+            if (!isFloat) {
+                // Integer arithmetic (unchanged)
+                switch (op) {
+                    case "add": dlxOp = DLX.ADD; break;
+                    case "sub": dlxOp = DLX.SUB; break;
+                    case "mul": dlxOp = DLX.MUL; break;
+                    case "div": dlxOp = DLX.DIV; break;
+                    case "mod": dlxOp = DLX.MOD; break;
+                    case "pow": dlxOp = DLX.POW; break;
+                    default:
+                        return; // unknown op
+                }
+            } else {
+                // Floating-point arithmetic
+                switch (op) {
+                    case "add": dlxOp = DLX.fADD; break;
+                    case "sub": dlxOp = DLX.fSUB; break;
+                    case "mul": dlxOp = DLX.fMUL; break;
+                    case "div": dlxOp = DLX.fDIV; break;
+                    case "mod": dlxOp = DLX.fMOD; break;  // if you actually use mod on floats
+                    // You probably don't want to support pow on floats here;
+                    // if you need it, you can use fPOW-like semantics via calls.
+                    default:
+                        return; // unsupported float op
+                }
             }
 
             code.add(DLX.assemble(dlxOp, dstReg, rL, rR));
@@ -3606,13 +3685,9 @@ public class Compiler {
 
         private void emitReturn(Assign a) {
             // 1. If there is a return value, evaluate it and move it into R27
-            if (a.left() != null) {
-                // Load the return expression into a temp register
+        	if (a.left() != null) {
                 int rVal = loadValue(a.left(), R_TMP1);
-
-                // Ensure the value is in R27 (our chosen return-value register)
                 if (rVal != 27) {
-                    // R27 = rVal + 0
                     code.add(DLX.assemble(DLX.ADD, 27, rVal, R_ZERO));
                 }
             }
@@ -3620,10 +3695,10 @@ public class Compiler {
             // 2. Emit RET with the correct register:
             //    - RET 0  : halt program (main returns to "nowhere")
             //    - RET 31 : return to caller (R[31] set by JSR)
-            if ("main".equals(currentFunction)) {
-                code.add(DLX.assemble(DLX.RET, 0));   // halt program
+        	if (currentFunction == null || "main".equals(currentFunction)) {
+                code.add(DLX.assemble(DLX.RET, 0));    // halt program
             } else {
-                code.add(DLX.assemble(DLX.RET, 31));  // jump to address in R[31]
+                code.add(DLX.assemble(DLX.RET, 31));   // jump to address in R[31]
             }
         }
 
